@@ -4,9 +4,8 @@ from config import *
 
 
 class Generator(nn.Module):
-    def __init__(self, ngpu):
+    def __init__(self):
         super(Generator, self).__init__()
-        self.ngpu = ngpu
         self.main = nn.Sequential(
             # input is Z, going into a convolution
             nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
