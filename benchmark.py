@@ -3,17 +3,17 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 # Parameters and DataLoaders
-input_size = 20000
-output_size = 20000
+input_size = 2000
+output_size = 2000
 
-batch_size = 50000
+batch_size = 5000
 data_size = 100000
 
 device_group_1 = [0, 1, 2, 3]
 device_group_2 = [1, 0, 2, 3]
 
-device1 = torch.device("cuda:{}".format(device_group_1[0]))
-device2 = torch.device("cuda:{}".format(device_group_2[0]))
+device1 = "cuda:{}".format(device_group_1[0])
+device2 = "cuda:{}".format(device_group_2[0])
 
 
 class RandomDataset(Dataset):

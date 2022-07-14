@@ -4,8 +4,8 @@ import torch
 device = "cuda:2"
 model = SentenceTransformer('distiluse-base-multilingual-cased-v1')
 
-col1 = ["我爱你", "我爱你", "你是傻瓜", "你好"]
-col2 = ["I love you", "I like you", "I love apple", "thank you"]
+col1 = ["我爱你"]
+col2 = ["I love you"]
 
 vectors1 = model.encode(col1, convert_to_tensor=True, device=device)
 vectors2 = model.encode(col2, convert_to_tensor=True, device=device)
