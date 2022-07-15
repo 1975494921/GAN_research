@@ -5,6 +5,7 @@ import torch.optim as optim
 from PGAN_utils import EqualizedLR_Conv2d, PixelNorm, Minibatch_std
 from PGAN_utils import depth_to_size, size_to_depth
 from config import Config
+import torch.nn.functional as F
 
 
 def print_func(*args):
@@ -47,14 +48,15 @@ class ToRGB(nn.Module):
 
 
 class Noise_Net(nn.Module):
-    def __init__(self):
+    def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
+        hidden = int(in_dim / 2)
         self.FN = nn.Sequential(
-            nn.Linear(256, 128),
+            nn.Linear(in_dim, hidden),
             nn.LeakyReLU(0.2),
             nn.Dropout(0.2),
-            nn.Linear(128, 512),
-            nn.Dropout(0.2)
+            nn.Linear(hidden, out_dim),
+            nn.LeakyReLU(0.2),
         )
         self.FN.apply(weights_init)
 
@@ -93,12 +95,13 @@ class G_Block(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, latent_size, out_res):
+    def __init__(self, noise_dim, latent_size, out_res):
         super().__init__()
         self._current_depth = 1  # starting from 1, 4x4
         self.alpha = 1
-        self.delta_alpha = 0
+        self.delta_alpha = 1e-3
         self.up_sample = nn.Upsample(scale_factor=2, mode='nearest')
+        self.noise_net = Noise_Net(noise_dim, latent_size)
         self.current_net = nn.ModuleList([G_Block(latent_size, latent_size, initial_block=True)])
         self.toRGBs = nn.ModuleList([ToRGB(latent_size, 3)])
         self.out_res = out_res
@@ -115,7 +118,8 @@ class Generator(nn.Module):
             self.current_net.append(G_Block(in_ch, out_ch))
             self.toRGBs.append(ToRGB(out_ch, 3))
 
-    def forward(self, x):
+    def forward(self, noise):
+        x = self.noise_net(noise)
         for block in self.current_net[:int(self._current_depth) - 1]:
             x = block(x)
 
@@ -160,6 +164,11 @@ class Generator(nn.Module):
                 if param.grad is not None:
                     param.grad *= factor
 
+    def scale_grad_noise(self, factor=0.5):
+        for param in self.noise_net.parameters():
+            if param.grad is not None:
+                param.grad *= factor
+
 
 class D_Block(nn.Module):
     def __init__(self, in_ch, out_ch, final_block=False):
@@ -171,7 +180,8 @@ class D_Block(nn.Module):
             self.conv2 = EqualizedLR_Conv2d(out_ch, out_ch, kernel_size=(4, 4), stride=(1, 1))
             self.outlayer = nn.Sequential(
                 nn.Flatten(),
-                nn.Linear(out_ch, 1)
+                nn.Linear(out_ch, 1),
+                # nn.Sigmoid()
             )
         else:
             self.minibatchstd = None
@@ -202,7 +212,7 @@ class Discriminator(nn.Module):
         super().__init__()
         self._current_depth = 1
         self.alpha = 1
-        self.delta_alpha = 0
+        self.delta_alpha = 1e-3
         self.down_sample = nn.AvgPool2d(kernel_size=(2, 2), stride=(2, 2))
         self.img_size = img_size
         self._max_depth = size_to_depth(img_size)
@@ -241,7 +251,7 @@ class Discriminator(nn.Module):
         x = self.current_net[self._internal_index](x)
         print_func("last_net shape: {}".format(x.shape))
 
-        if self.alpha < 1 and self._internal_index != self._max_depth-1:
+        if self.alpha < 1 and self._internal_index != self._max_depth - 1:
             x_rgb = self.down_sample(x_rgb)
             x_old = self.fromRGBs[self._internal_index + 1](x_rgb)
             x = (1 - self.alpha) * x_old + self.alpha * x
@@ -252,7 +262,8 @@ class Discriminator(nn.Module):
             print_func(x.shape)
             print_func(block)
             x = block(x)
-        return x
+
+        return torch.sigmoid(0.5 * x)
 
     def set_depth(self, depth: int, alpha_start=0, delta_alpha=1e-3):
         if 1 <= depth <= self._max_depth:
@@ -283,40 +294,3 @@ class Discriminator(nn.Module):
             for param in block.parameters():
                 if param.grad is not None:
                     param.grad *= factor
-
-
-# dis = Discriminator(512, 1024).to(Config.devices[0])
-# for i in range(1, size_to_depth(1024)+1):
-#     dis.set_depth(i)
-#     gen_image = torch.randn(1, 3, depth_to_size(i), depth_to_size(i)).to(Config.devices[0])
-#     out = dis(gen_image)
-#     print(out.shape)
-
-
-gen = Generator(512, 1024).to(Config.devices[0])
-gen = nn.DataParallel(gen, device_ids=Config.device_groups[0])
-dis = Discriminator(512, 1024).to(Config.devices[1])
-dis = nn.DataParallel(dis, device_ids=Config.device_groups[1])
-a = Noise_Net().to(Config.devices[0])
-
-G_optim = optim.Adam(gen.parameters(), lr=0.0003)
-D_optim = optim.SGD(gen.parameters(), lr=0.0002)
-loss_func = nn.MSELoss()
-real_label = torch.ones((56, 1)).to(Config.devices[1])
-
-for i in range(9, 10):
-    gen.module.set_depth(i)
-    dis.module.set_depth(i)
-    for _ in range(5000):
-        noise = torch.randn(56, 256).to(Config.devices[0])
-        noise_out = a(noise)
-        image = gen(noise_out)
-        image = image.to(Config.devices[1])
-        score = dis(image)
-        G_optim.zero_grad()
-        D_optim.zero_grad()
-        loss = loss_func(score, real_label)
-        loss.backward()
-        D_optim.step()
-        G_optim.step()
-        print(loss)

@@ -37,9 +37,9 @@ print("1")
 class Model(nn.Module):
     def __init__(self, input_size, output_size):
         super(Model, self).__init__()
-        self.fc1 = nn.Linear(input_size, 1000)
-        self.fc2 = nn.Linear(1000, 1000)
-        self.fc3 = nn.Linear(1000, output_size)
+        self.fc1 = nn.Linear(input_size, 5000)
+        self.fc2 = nn.Linear(5000, 3000)
+        self.fc3 = nn.Linear(3000, output_size)
 
     def forward(self, input):
         output = self.fc2(self.fc1(input))
@@ -69,7 +69,9 @@ input = torch.randn((batch_size, input_size)).to(device1)
 target = torch.randn((batch_size, output_size)).to(device2)
 print("7")
 print("Start training...")
+i = 0
 while True:
+    i += 1
     output = model1(input)
     output_final = model2(output)
     optim1.zero_grad()
@@ -78,3 +80,4 @@ while True:
     loss.backward()
     optim2.step()
     optim1.step()
+    print(i)
