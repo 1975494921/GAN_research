@@ -98,7 +98,7 @@ class Generator(nn.Module):
     def __init__(self, noise_dim, latent_size, out_res):
         super().__init__()
         self._current_depth = 1  # starting from 1, 4x4
-        self.alpha = 1
+        self.alpha = 0.1
         self.delta_alpha = 1e-3
         self.up_sample = nn.Upsample(scale_factor=2, mode='nearest')
         self.noise_net = Noise_Net(noise_dim, latent_size)
@@ -124,17 +124,26 @@ class Generator(nn.Module):
             x = block(x)
 
         model_out = self.current_net[self._current_depth - 1](x)
-
         x_rgb = self.toRGBs[self._current_depth - 1](model_out)
-        if self.alpha < 1 and self._current_depth != 1:
+
+        if self.alpha < 1 and self._current_depth > 1:
             x_old = self.up_sample(x)
             old_rgb = self.toRGBs[self._current_depth - 2](x_old)
             x_rgb = (1 - self.alpha) * old_rgb + self.alpha * x_rgb
 
-            self.alpha += self.delta_alpha
-            self.alpha = min(self.alpha, 1)
+            # self.alpha += self.delta_alpha
+            # self.alpha = min(self.alpha, 1)
 
         return x_rgb
+
+    def get_alpha(self):
+        return self.alpha
+
+    def increase_alpha(self, delta=None):
+        if delta is None:
+            delta = self.delta_alpha
+
+        self.alpha = min(self.alpha + delta, 1)
 
     def growing_net(self, alpha_start=0, delta_alpha=1e-3):
         if self._current_depth < self.max_depth:
@@ -211,7 +220,7 @@ class Discriminator(nn.Module):
     def __init__(self, latent_size, img_size):
         super().__init__()
         self._current_depth = 1
-        self.alpha = 1
+        self.alpha = 0.1
         self.delta_alpha = 1e-3
         self.down_sample = nn.AvgPool2d(kernel_size=(2, 2), stride=(2, 2))
         self.img_size = img_size
@@ -251,12 +260,12 @@ class Discriminator(nn.Module):
         x = self.current_net[self._internal_index](x)
         print_func("last_net shape: {}".format(x.shape))
 
-        if self.alpha < 1 and self._internal_index != self._max_depth - 1:
+        if self.alpha < 1 and self._internal_index < self._max_depth - 1:
             x_rgb = self.down_sample(x_rgb)
             x_old = self.fromRGBs[self._internal_index + 1](x_rgb)
             x = (1 - self.alpha) * x_old + self.alpha * x
-            self.alpha += self.delta_alpha
-            self.alpha = min(self.alpha, 1)
+            # self.alpha += self.delta_alpha
+            # self.alpha = min(self.alpha, 1)
 
         for block in self.current_net[self._internal_index + 1:]:
             print_func(x.shape)
@@ -294,3 +303,12 @@ class Discriminator(nn.Module):
             for param in block.parameters():
                 if param.grad is not None:
                     param.grad *= factor
+
+    def get_alpha(self):
+        return self.alpha
+
+    def increase_alpha(self, delta=None):
+        if delta is None:
+            delta = self.delta_alpha
+
+        self.alpha = min(self.alpha + delta, 1)

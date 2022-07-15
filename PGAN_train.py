@@ -9,12 +9,17 @@ from torchvision import transforms
 from torchvision.utils import make_grid, save_image
 from torchvision import datasets
 
+print("CUDA_HOME :{}".format(os.environ.get('CUDA_HOME')))
+print("CNN_HOME  :{}".format(os.environ.get('CNN_HOME')))
+
+D_Use_Mean = True
+
 model_root = 'model_trains'
 if not os.path.isdir(model_root):
     os.mkdir(model_root)
 
-valid = True
 train_key = "train001"
+valid = True
 while not valid:
     train_key = input("Please input the train key folder: ")
     if train_key == "":
@@ -38,14 +43,17 @@ D_net.load_state_dict(model_state_dict['D_net'])
 print("Loaded model file: {}".format(pretrained_file))
 
 data_dir = "/home/zceelil/dataset"
-epos_list = [0, 200, 500, 1000, 1000, 1000, 1000, 1000, 1000, 10]
-batch_list = [0, 4000, 1000, 1000, 1000, 1000, 500, 200, 80, 40]
-save_internal = [0, 10, 10, 10, 5, 5, 5, 3, 1, 1]
-start_depth = model_state_dict['current_depth']
+epos_list = [0, 100, 1000, 1500, 1500, 2000, 2000, 2000, 2000, 2000]
+batch_list = [0, 500, 1000, 500, 500, 500, 500, 200, 80, 40]
+save_internal = [0, 50, 50, 50, 50, 30, 20, 3, 1, 1]
+alpha_list = [0, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
+
+# start_depth = model_state_dict['current_depth']
+
+start_depth = 2
 end_depth = size_to_depth(256)
 
-
-G_optim = optim.Adam(G_net.parameters(), lr=0.0003)
+G_optim = optim.Adam(G_net.parameters(), lr=0.0002)
 D_optim = optim.Adam(D_net.parameters(), lr=0.0002)
 loss_func = nn.BCELoss()
 
@@ -64,11 +72,14 @@ for depth in range(start_depth, end_depth + 1):
     dataset = datasets.ImageFolder(data_dir, transform=transform)
     data_loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, num_workers=16)
 
-    G_net.module.set_depth(depth, alpha_start=0.5)
-    D_net.module.set_depth(depth, alpha_start=0.5)
+    G_net.module.set_depth(depth, alpha_start=alpha_list[depth], delta_alpha=0.002)
+    D_net.module.set_depth(depth, alpha_start=alpha_list[depth], delta_alpha=0.002)
 
-    for epo in range(epos_list[depth]):
+    for epo in range(1, epos_list[depth] + 1):
         batch_size = batch_list[depth]
+        if epo > epos_list[depth] // 2:
+            D_Use_Mean = False
+
         for batch_ndx, sample in enumerate(data_loader):
             sample = sample[0].to(Config.devices[1])
             real_label = torch.full((sample.shape[0], 1,), 1, dtype=torch.float).to(Config.devices[1])
@@ -102,7 +113,10 @@ for depth in range(start_depth, end_depth + 1):
             D_loss_real = loss_func(real_out, real_label)
             D_loss_fake = loss_func(fake_out, fake_label)
 
-            D_loss = D_loss_real.mean() + D_loss_fake.mean()
+            if D_Use_Mean:
+                D_loss = D_loss_real.mean() + D_loss_fake.mean()
+            else:
+                D_loss = D_loss_real + D_loss_fake
 
             D_loss.backward()
             D_net.module.scale_grad(0.6)
@@ -116,20 +130,24 @@ for depth in range(start_depth, end_depth + 1):
             G_loss.backward()
             G_net.module.scale_grad(0.6)
             if depth > 1:
-                G_net.module.scale_grad_noise(0.5)
+                G_net.module.scale_grad_noise(0.4)
 
             G_optim.step()
 
             ##############
-            print("\r G_loss: {}; D_loss: {}".format(G_loss.mean().item(), D_loss.mean().item()), end="")
+            print("\r Epo: {}; G_loss: {}; D_loss: {}; Alpha: [{}, {}]".format(epo, round(G_loss.mean().item(), 4),
+                    round(D_loss.mean().item(), 4), round(G_net.module.get_alpha(), 4), round(D_net.module.get_alpha(), 4)), end="")
 
-        if (epo+1) % save_internal[depth] == 0:
+        if epo % save_internal[depth] == 0:
             save_dict = {'G_net': G_net.state_dict(), 'D_net': D_net.state_dict(), 'current_depth': depth,
                          'noise_size': 256, 'img_size': depth_to_size(depth), 'latent_size': 512}
 
             save_path = os.path.join(model_dir, "model_{}.pth".format(depth))
             torch.save(save_dict, save_path)
             print("\n Model saves at Depth:{} Epoch:{}".format(depth, epo))
+
+        G_net.module.increase_alpha()
+        D_net.module.increase_alpha()
 
     save_dict = {'G_net': G_net.state_dict(), 'D_net': D_net.state_dict(), 'current_depth': depth,
                  'noise_size': 256, 'img_size': depth_to_size(depth), 'latent_size': 512}
