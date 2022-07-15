@@ -13,6 +13,7 @@ print("CUDA_HOME :{}".format(os.environ.get('CUDA_HOME')))
 print("CNN_HOME  :{}".format(os.environ.get('CNN_HOME')))
 
 D_Use_Mean = True
+Use_last_alpha = True
 
 model_root = 'model_trains'
 if not os.path.isdir(model_root):
@@ -36,21 +37,23 @@ G_net = nn.DataParallel(G_net, device_ids=Config.device_groups[0])
 D_net = Discriminator(512, 1024).to(Config.devices[1])
 D_net = nn.DataParallel(D_net, device_ids=Config.device_groups[1])
 
-pretrained_file = os.path.join(model_dir, "model_{}.pth".format(2))
+pretrained_file = os.path.join(model_dir, "model_{}.pth".format(3))
 model_state_dict = torch.load(pretrained_file, map_location=torch.device(Config.devices[0]))
 G_net.load_state_dict(model_state_dict['G_net'])
 D_net.load_state_dict(model_state_dict['D_net'])
 print("Loaded model file: {}".format(pretrained_file))
 
 data_dir = "/home/zceelil/dataset"
-epos_list = [0, 100, 1000, 1500, 1500, 2000, 2000, 2000, 2000, 2000]
-batch_list = [0, 500, 1000, 500, 500, 500, 500, 200, 80, 40]
+epos_list = [0, 100, 100, 600, 600, 600, 1200, 2000, 2000, 2000]
+batch_list = [0, 500, 500, 500, 500, 500, 500, 200, 100, 40]
 save_internal = [0, 50, 50, 50, 50, 30, 20, 3, 1, 1]
-alpha_list = [0, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
+alpha_list = [0, 1, 1, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
 
+if Use_last_alpha:
+    alpha_list[model_state_dict['current_depth']] = model_state_dict['alpha']
 # start_depth = model_state_dict['current_depth']
 
-start_depth = 2
+start_depth = 3
 end_depth = size_to_depth(256)
 
 G_optim = optim.Adam(G_net.parameters(), lr=0.0002)
@@ -77,7 +80,7 @@ for depth in range(start_depth, end_depth + 1):
 
     for epo in range(1, epos_list[depth] + 1):
         batch_size = batch_list[depth]
-        if epo > epos_list[depth] // 2:
+        if epo > (epos_list[depth] // 3) * 2:
             D_Use_Mean = False
 
         for batch_ndx, sample in enumerate(data_loader):
@@ -140,7 +143,7 @@ for depth in range(start_depth, end_depth + 1):
 
         if epo % save_internal[depth] == 0:
             save_dict = {'G_net': G_net.state_dict(), 'D_net': D_net.state_dict(), 'current_depth': depth,
-                         'noise_size': 256, 'img_size': depth_to_size(depth), 'latent_size': 512}
+                         'noise_size': 256, 'img_size': depth_to_size(depth), 'latent_size': 512, 'alpha': G_net.module.get_alpha()}
 
             save_path = os.path.join(model_dir, "model_{}.pth".format(depth))
             torch.save(save_dict, save_path)
@@ -149,8 +152,8 @@ for depth in range(start_depth, end_depth + 1):
         G_net.module.increase_alpha()
         D_net.module.increase_alpha()
 
-    save_dict = {'G_net': G_net.state_dict(), 'D_net': D_net.state_dict(), 'current_depth': depth,
-                 'noise_size': 256, 'img_size': depth_to_size(depth), 'latent_size': 512}
-    save_path = os.path.join(model_dir, "model_{}.pth".format(depth))
-    torch.save(save_dict, save_path)
-    print("\n Model saves at Depth:{}".format(depth))
+    # save_dict = {'G_net': G_net.state_dict(), 'D_net': D_net.state_dict(), 'current_depth': depth,
+    #              'noise_size': 256, 'img_size': depth_to_size(depth), 'latent_size': 512}
+    # save_path = os.path.join(model_dir, "model_{}.pth".format(depth))
+    # torch.save(save_dict, save_path)
+    # print("\n Model saves at Depth:{}".format(depth))
