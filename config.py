@@ -1,7 +1,13 @@
+import torch
+
+
 class Config:
     debug = False
 
-    device_groups = [[2, 3, 4, 5, 6, 7], [2, 3, 4, 5, 6, 7]]
+    ngpus = min(torch.cuda.device_count(), 8)
+    device_groups = [[i for i in range(0, ngpus)],
+                     [i for i in range(0, ngpus)]]
+
     devices = ["cuda:{}".format(item[0]) for item in device_groups]
 
     nz_dim = 32  # Noise dim

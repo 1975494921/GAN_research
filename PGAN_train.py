@@ -11,10 +11,10 @@ from torchvision import datasets
 
 print("CUDA_HOME :{}".format(os.environ.get('CUDA_HOME')))
 print("CNN_HOME  :{}".format(os.environ.get('CNN_HOME')))
-
-D_Use_Mean = True
+print("GPUs: {}".format(Config.ngpus))
 Use_last_alpha = True
 
+load_depth = 5
 model_root = 'model_trains'
 if not os.path.isdir(model_root):
     os.mkdir(model_root)
@@ -37,14 +37,14 @@ G_net = nn.DataParallel(G_net, device_ids=Config.device_groups[0])
 D_net = Discriminator(512, 1024).to(Config.devices[1])
 D_net = nn.DataParallel(D_net, device_ids=Config.device_groups[1])
 
-pretrained_file = os.path.join(model_dir, "model_{}.pth".format(3))
+pretrained_file = os.path.join(model_dir, "model_{}.pth".format(load_depth))
 model_state_dict = torch.load(pretrained_file, map_location=torch.device(Config.devices[0]))
 G_net.load_state_dict(model_state_dict['G_net'])
 D_net.load_state_dict(model_state_dict['D_net'])
 print("Loaded model file: {}".format(pretrained_file))
 
 data_dir = "/home/zceelil/dataset"
-epos_list = [0, 100, 100, 600, 600, 600, 1200, 2000, 2000, 2000]
+epos_list = [0, 100, 100, 450, 780, 780, 900, 2000, 2000, 2000]
 batch_list = [0, 500, 500, 500, 500, 500, 500, 200, 100, 40]
 save_internal = [0, 50, 50, 50, 50, 30, 20, 3, 1, 1]
 alpha_list = [0, 1, 1, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
@@ -53,7 +53,7 @@ if Use_last_alpha:
     alpha_list[model_state_dict['current_depth']] = model_state_dict['alpha']
 # start_depth = model_state_dict['current_depth']
 
-start_depth = 3
+start_depth = load_depth
 end_depth = size_to_depth(256)
 
 G_optim = optim.Adam(G_net.parameters(), lr=0.0002)
@@ -65,6 +65,7 @@ torch.set_default_tensor_type(torch.FloatTensor)
 del model_state_dict
 print("start training...")
 for depth in range(start_depth, end_depth + 1):
+    D_Use_Mean = True
     batch_size = batch_list[depth]
     img_size = depth_to_size(depth)
     transform = transforms.Compose([
@@ -122,7 +123,7 @@ for depth in range(start_depth, end_depth + 1):
                 D_loss = D_loss_real + D_loss_fake
 
             D_loss.backward()
-            D_net.module.scale_grad(0.6)
+            D_net.module.scale_grad(0.8)
             D_optim.step()
 
             ## update G
@@ -131,15 +132,15 @@ for depth in range(start_depth, end_depth + 1):
 
             G_loss = loss_func(fake_out, real_label)
             G_loss.backward()
-            G_net.module.scale_grad(0.6)
+            G_net.module.scale_grad(0.8)
             if depth > 1:
-                G_net.module.scale_grad_noise(0.4)
+                G_net.module.scale_grad_noise(0.6)
 
             G_optim.step()
 
             ##############
-            print("\r Epo: {}; G_loss: {}; D_loss: {}; Alpha: [{}, {}]".format(epo, round(G_loss.mean().item(), 4),
-                    round(D_loss.mean().item(), 4), round(G_net.module.get_alpha(), 4), round(D_net.module.get_alpha(), 4)), end="")
+            print("\r Epo: {}; G_loss: {:.4f}; D_loss: {:.4f}; Alpha: [{:.3f}, {:.3f}]".format(epo, G_loss.mean(),
+                    D_loss.mean().item(), G_net.module.get_alpha(), D_net.module.get_alpha()), end="")
 
         if epo % save_internal[depth] == 0:
             save_dict = {'G_net': G_net.state_dict(), 'D_net': D_net.state_dict(), 'current_depth': depth,

@@ -151,7 +151,7 @@ class Generator(nn.Module):
             self.alpha = alpha_start
             self._current_depth += 1
             im_size = depth_to_size(self._current_depth)
-            print("Generator depth changed to {}, image size {}x{}".
+            print("Generator depth is set to {}, image size {}x{}".
                   format(self._current_depth, im_size, im_size))
         else:
             print("Net cannot be grow, depth should be within {} to {}".format(1, self.max_depth))
@@ -162,7 +162,7 @@ class Generator(nn.Module):
             self.delta_alpha = delta_alpha
             self.alpha = alpha_start
             im_size = depth_to_size(self._current_depth)
-            print("Generator depth changed to {}, image size {}x{}".
+            print("Generator depth is set to {}, image size {}x{}".
                   format(self._current_depth, im_size, im_size))
         else:
             print("Depth value invalid..., should be within {} to {}".format(1, self.max_depth))
@@ -281,7 +281,7 @@ class Discriminator(nn.Module):
             self.delta_alpha = delta_alpha
             self.alpha = alpha_start
             im_size = depth_to_size(self._current_depth)
-            print("Discriminator depth changed to {}, image size {}x{}".
+            print("Discriminator depth is set to {}, image size {}x{}".
                   format(self._current_depth, im_size, im_size))
         else:
             print("Depth value invalid..., should be within {} to {}".format(1, self._max_depth))
@@ -293,7 +293,7 @@ class Discriminator(nn.Module):
             self.delta_alpha = delta_alpha
             self.alpha = alpha_start
             im_size = depth_to_size(self._current_depth)
-            print("Discriminator depth changed to {}, image size {}x{}".
+            print("Discriminator depth is set to {}, image size {}x{}".
                   format(self._current_depth, im_size, im_size))
         else:
             print("Net cannot be grow, depth should be within {} to {}".format(1, self._max_depth))
