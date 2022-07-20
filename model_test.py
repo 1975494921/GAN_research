@@ -53,10 +53,10 @@ def test_all():
     loss_func = nn.MSELoss()
     real_label = torch.ones((56, 1)).to(Config.devices[1])
 
-    for i in range(9, 10):
+    for i in range(1, 10):
         gen.module.set_depth(i)
         dis.module.set_depth(i)
-        for j in range(5000):
+        for j in range(1):
             noise = torch.randn(56, 256).to(Config.devices[0])
             image = gen(noise)
             image = image.to(Config.devices[1])
@@ -68,10 +68,5 @@ def test_all():
             D_optim.step()
             G_optim.step()
             print(loss)
-            if j % 10 == 0:
-                save_dict = {'G_net': gen.state_dict(), 'D_net': dis.state_dict(), 'current_depth': i,
-                             'noise_size': 256, 'img_size': 1024, 'latent_size': 512}
-                torch.save(save_dict, "PGAN_model.pth")
-                print("model_saves")
 
 test_all()

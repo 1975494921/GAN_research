@@ -5,8 +5,9 @@ class Config:
     debug = False
 
     ngpus = min(torch.cuda.device_count(), 8)
-    device_groups = [[i for i in range(0, ngpus)],
-                     [i for i in range(0, ngpus)]]
+    gpu_shift = 0
+    device_groups = [[i for i in range(gpu_shift, ngpus + gpu_shift)],
+                     [i for i in range(gpu_shift, ngpus + gpu_shift)]]
 
     devices = ["cuda:{}".format(item[0]) for item in device_groups]
 

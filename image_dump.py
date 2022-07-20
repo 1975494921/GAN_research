@@ -5,16 +5,15 @@ import os
 from PGAN_models import Generator, Discriminator
 from PGAN_utils import size_to_depth
 import math
-import time
 
 num_generate = 16
+num_grid = 16
 img_size = 64
 model_root = 'model_trains'
-model_key = "train001"
+model_key = "cartoon_train001"
 model_dir = os.path.join(model_root, model_key)
-generate_interval = 300
 
-device_ids = [0, 1]
+device_ids = [8, 9]
 device = torch.device("cuda:{}".format(device_ids[0]))
 
 image_root = "image_results"
@@ -32,22 +31,22 @@ image_dir = os.path.join(image_root, model_key)
 if not os.path.isdir(image_dir):
     os.mkdir(image_dir)
 
+image_dir = os.path.join(image_dir, "Depth_{}".format(model_depth))
+if not os.path.isdir(image_dir):
+    os.mkdir(image_dir)
+
 
 G_net = Generator(256, 512, 1024).to(device)
 G_net = nn.DataParallel(G_net, device_ids=device_ids)
 G_net.module.set_depth(model_depth, alpha_start=1)
 
-while True:
-    model_state_dict = torch.load(model_file, map_location=device)
-    G_net.load_state_dict(model_state_dict['G_net'])
-    del model_state_dict
+model_state_dict = torch.load(model_file, map_location=device)
+G_net.load_state_dict(model_state_dict['G_net'])
+G_net.eval()
 
-    with torch.no_grad():
-        noise = torch.randn(num_generate, 256).to(device)
-        fake = G_net(noise)
-        img_path = os.path.join(image_dir, "image_{}.jpg".format(model_depth))
-        save_image(make_grid(fake, padding=1, normalize=True, nrow=int(math.sqrt(num_generate))), img_path)
-        t = time.localtime()
-        print("Save image at {:02d}:{:02d} -- {}".format(t.tm_hour, t.tm_min, os.path.basename(img_path)))
-
-    time.sleep(generate_interval)
+for i in range(num_generate):
+    noise = torch.randn(num_grid, 256).to(device)
+    fake = G_net(noise)
+    img_path = os.path.join(image_dir, "image_{}.jpg".format(i))
+    save_image(make_grid(fake, padding=1, normalize=True, nrow=int(math.sqrt(num_grid))), img_path)
+    print("Save image: {}".format("image_{}.jpg".format(i)))

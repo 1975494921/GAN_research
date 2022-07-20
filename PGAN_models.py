@@ -1,7 +1,6 @@
 import torch
-import torch.nn as nn
+from torch import nn, optim
 import math
-import torch.optim as optim
 from PGAN_utils import EqualizedLR_Conv2d, PixelNorm, Minibatch_std
 from PGAN_utils import depth_to_size, size_to_depth
 from config import Config
@@ -16,14 +15,14 @@ def print_func(*args):
 def weights_init(w):
     classname = w.__class__.__name__
     if classname.find('Conv') != -1:
-        nn.init.normal_(w.weight.data, 0.0, 0.02)
+        nn.init.kaiming_normal_(w.weight.data, a=0, mode='fan_in', nonlinearity='leaky_relu')
 
     elif classname.find('BatchNorm2d') != -1:
         nn.init.normal_(w.weight.data, 1.0, 0.02)
         nn.init.constant_(w.bias.data, 0)
 
     elif classname.find('Linear') != -1:
-        nn.init.xavier_normal_(w.weight.data)
+        nn.init.kaiming_normal_(w.weight.data, a=0, mode='fan_in', nonlinearity='leaky_relu')
         nn.init.constant_(w.bias.data, 0)
 
 
@@ -66,14 +65,80 @@ class Noise_Net(nn.Module):
         return out
 
 
+class ECA_Block(nn.Module):
+    # Channel attention
+    def __init__(self, k_size=3):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False)
+        nn.init.normal_(self.conv.weight)
+
+    def forward(self, x):
+        # feature descriptor on the global spatial information
+        attn = self.avg_pool(x)
+
+        # Two different branches of ECA module
+        attn = self.conv(attn.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+
+        # Multi-scale information fusion
+        attn = torch.sigmoid(attn)
+
+        return x * attn.expand_as(x)
+
+
+class SA_Block(nn.Module):
+    # Spatial Attention
+    def __init__(self, kernel_size=7):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2)
+        self.sigmoid = nn.Sigmoid()
+        nn.init.xavier_uniform_(self.conv.weight)
+
+    def forward(self, x):
+        max_result, _ = torch.max(x, dim=1, keepdim=True)
+        avg_result = torch.mean(x, dim=1, keepdim=True)
+        result = torch.cat([max_result, avg_result], 1)
+        attn = self.conv(result)
+        attn = self.sigmoid(attn)
+
+        return x * attn.expand_as(x)
+
+
+class Residual_Block(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.residual = None
+        self.ECA = None
+        self.SA = None
+        if in_ch != out_ch:
+            self.residual = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            self.ECA = ECA_Block()
+            self.SA = SA_Block()
+
+    def forward(self, x):
+        if self.residual is not None:
+            x = self.residual(x)
+            x = self.ECA(x)
+            x = self.SA(x)
+
+        return x
+
+
 class G_Block(nn.Module):
     def __init__(self, in_ch, out_ch, initial_block=False):
         super().__init__()
+        self.upsample = None
+        self.residual = None
+        self.conv1_ECA = ECA_Block()
+        self.conv1_SA = SA_Block()
+        self.conv2_ECA = ECA_Block()
+        self.conv2_SA = SA_Block()
+
         if initial_block:
-            self.upsample = None
             self.conv1 = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(4, 4), stride=(1, 1), padding=(3, 3))
         else:
             self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
+            self.residual = Residual_Block(in_ch, out_ch)
             self.conv1 = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
 
         self.conv2 = EqualizedLR_Conv2d(out_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
@@ -84,12 +149,19 @@ class G_Block(nn.Module):
         if self.upsample is not None:
             x = self.upsample(x)
         # x = self.conv1(x*scale1)
-        x = self.conv1(x)
+        residual_out = self.residual(x) if self.residual is not None else None
+
+        x = self.conv1_ECA(self.conv1(x))
+        x = self.conv1_SA(x)
         x = self.relu(x)
         x = self.pixel_norm(x)
         # x = self.conv2(x*scale2)
-        x = self.conv2(x)
+        x = self.conv2_ECA(self.conv2(x))
+        x = self.conv2_SA(x)
         x = self.relu(x)
+        if residual_out is not None:
+            x = x + residual_out
+
         x = self.pixel_norm(x)
         return x
 
@@ -120,6 +192,7 @@ class Generator(nn.Module):
 
     def forward(self, noise):
         x = self.noise_net(noise)
+        # x = noise
         for block in self.current_net[:int(self._current_depth) - 1]:
             x = block(x)
 
@@ -182,7 +255,12 @@ class Generator(nn.Module):
 class D_Block(nn.Module):
     def __init__(self, in_ch, out_ch, final_block=False):
         super().__init__()
-        self.fn = nn.Linear(in_ch, out_ch)
+        self.conv1_ECA = ECA_Block()
+        self.conv1_SA = SA_Block()
+        self.conv2_ECA = ECA_Block()
+        self.conv2_SA = SA_Block()
+        self.residual = None
+
         if final_block:
             self.minibatchstd = Minibatch_std()
             self.conv1 = EqualizedLR_Conv2d(in_ch + 1, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
@@ -194,6 +272,7 @@ class D_Block(nn.Module):
             )
         else:
             self.minibatchstd = None
+            self.residual = Residual_Block(in_ch, out_ch)
             self.conv1 = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
             self.conv2 = EqualizedLR_Conv2d(out_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
             self.outlayer = nn.AvgPool2d(kernel_size=(2, 2), stride=(2, 2))
@@ -208,9 +287,15 @@ class D_Block(nn.Module):
         if self.minibatchstd is not None:
             x = self.minibatchstd(x)
 
-        x = self.conv1(x)
+        residual_out = self.residual(x) if self.residual is not None else None
+        x = self.conv1_ECA(self.conv1(x))
+        x = self.conv1_SA(x)
         x = self.relu(x)
-        x = self.conv2(x)
+        x = self.conv2_ECA(self.conv2(x))
+        x = self.conv2_SA(x)
+        if residual_out is not None:
+            x = x + residual_out
+
         x = self.relu(x)
         x = self.outlayer(x)
         return x
