@@ -1,4 +1,4 @@
-from PGAN_models import Discriminator, Generator
+from WPGAN_models import Discriminator, Generator
 from config import Config
 from PGAN_utils import size_to_depth, depth_to_size
 import torch
@@ -16,7 +16,7 @@ print("GPUs: {}".format(Config.ngpus))
 
 
 class Trainer:
-    def __init__(self, project_name):
+    def __init__(self, project_name, batch_scale):
         self.project_name = project_name
         self.project_param = Config.Project_Params[project_name]
 
@@ -28,6 +28,11 @@ class Trainer:
         self.epos_list = self.project_param['epos_list']
         self.batch_list = self.project_param['batch_list']
         self.save_internal = self.project_param['save_internal']
+        self.noise_net = self.project_param['Noise_Net']
+        self.resnet = self.project_param['Resnet']
+        self.nz_dim = 256
+        self.latent_dim = self.project_param['latent_dim']
+        self.batch_scale = float(batch_scale)
 
         print("Dataset Folder: {}".format(self.data_dir))
 
@@ -41,15 +46,15 @@ class Trainer:
             project_exist = False
 
         print("Project Exist: {}".format(project_exist))
-        G_net = Generator(256, 512, 1024).to(Config.devices[0])
+        G_net = Generator(self.nz_dim, self.latent_dim, 1024, noise_net=self.noise_net, resnet=self.resnet).to(Config.devices[0])
         self.G_net = nn.DataParallel(G_net, device_ids=Config.device_groups[0])
-        D_net = Discriminator(512, 1024).to(Config.devices[1])
+        D_net = Discriminator(self.latent_dim, 1024, resnet=self.resnet).to(Config.devices[1])
         self.D_net = nn.DataParallel(D_net, device_ids=Config.device_groups[1])
 
         # start_depth = model_state_dict['current_depth']
-        self.G_optim = optim.Adam(self.G_net.parameters(), lr=self.project_param['G_lr'])
-        self.D_optim = optim.Adam(self.D_net.parameters(), lr=self.project_param['D_lr'])
-        self.loss_func = nn.MSELoss()
+        self.G_optim = optim.Adam(self.G_net.parameters(), lr=self.project_param['G_lr'], betas=(0, 0.99))
+        self.D_optim = optim.Adam(self.D_net.parameters(), lr=self.project_param['D_lr'], betas=(0, 0.99))
+        self.loss_func = nn.BCELoss()
         torch.set_default_tensor_type(torch.FloatTensor)
 
     def load_module(self):
@@ -64,9 +69,6 @@ class Trainer:
 
             del model_state_dict
 
-        else:
-            raise FileNotFoundError("Model file: {} not found".format(pretrained_file))
-
     def dump_model(self, depth):
         save_dict = {'G_net': self.G_net.state_dict(), 'D_net': self.D_net.state_dict(), 'current_depth': depth,
                      'noise_size': 256, 'latent_size': 512, 'alpha': self.G_net.module.get_alpha()}
@@ -76,8 +78,8 @@ class Trainer:
     def start_training(self):
         print("start training...")
         for depth in range(self.start_depth, self.end_depth + 1):
-            D_Use_Mean = True if self.project_param['Use_Mean'] else False
-            batch_size = self.batch_list[depth]
+            Use_Mean = True if self.project_param['Use_Mean'] else False
+            batch_size = int(self.batch_list[depth] * self.batch_scale)
             img_size = depth_to_size(depth)
             transform = transforms.Compose([
                 transforms.Resize(max(img_size, 128)),
@@ -92,46 +94,36 @@ class Trainer:
             self.D_net.module.set_depth(depth, alpha_start=self.alpha_list[depth], delta_alpha=self.delta_alpha)
 
             for epo in range(1, self.epos_list[depth] + 1):
-                if epo > (self.epos_list[depth] // 3 * 2):
-                    D_Use_Mean = False
-
                 for batch_ndx, sample in enumerate(data_loader):
                     sample = sample[0].to(Config.devices[1])
-                    real_label = torch.full((sample.shape[0], 1,), 1, dtype=torch.float).to(Config.devices[1])
-                    fake_label = torch.full((sample.shape[0], 1,), 0, dtype=torch.float).to(Config.devices[1])
 
                     # update D
                     self.D_optim.zero_grad()
-                    noise = torch.randn(sample.shape[0], 256).to(Config.devices[0])
+                    if self.noise_net:
+                        noise = torch.randn(sample.shape[0], self.nz_dim).to(Config.devices[0])
+                    else:
+                        noise = torch.randn(sample.shape[0], self.latent_dim).to(Config.devices[0])
+
                     fake = self.G_net(noise).to(Config.devices[1])
                     fake_out = self.D_net(fake.detach())
                     real_out = self.D_net(sample)
 
-                    # gradient_penalty = 0
-                    # if False:
-                    #     ## Gradient Penalty
-                    #     eps = torch.rand(sample.shape[0], 1, 1, 1).to(Config.devices[1])
-                    #     eps = eps.expand_as(sample)
-                    #     x_hat = eps * sample + (1 - eps) * fake.detach()
-                    #     x_hat.requires_grad = True
-                    #     px_hat = D_net(x_hat)
-                    #     grad = torch.autograd.grad(
-                    #         outputs=px_hat.sum(),
-                    #         inputs=x_hat,
-                    #         create_graph=True
-                    #     )[0]
-                    #     grad_norm = grad.view(sample.shape[0], -1).norm(2, dim=1)
-                    #     gradient_penalty = 2 * ((grad_norm - 1) ** 2).mean()
+                    ## Gradient Penalty
+                    eps = torch.rand(sample.shape[0], 1, 1, 1).to(Config.devices[1])
+                    eps = eps.expand_as(sample)
+                    x_hat = eps * sample + (1 - eps) * fake.detach()
+                    x_hat.requires_grad = True
+                    px_hat = self.D_net(x_hat)
+                    grad = torch.autograd.grad(
+                        outputs=px_hat.sum(),
+                        inputs=x_hat,
+                        create_graph=True
+                    )[0]
+                    grad_norm = grad.view(sample.shape[0], -1).norm(2, dim=1)
+                    gradient_penalty = 10 * ((grad_norm - 1) ** 2).mean()
 
-                    ###########
-
-                    D_loss_real = self.loss_func(real_out, real_label)
-                    D_loss_fake = self.loss_func(fake_out, fake_label)
-
-                    if D_Use_Mean:
-                        D_loss = D_loss_real.mean() + D_loss_fake.mean()
-                    else:
-                        D_loss = D_loss_real + D_loss_fake
+                    # Wasserstein distance
+                    D_loss = fake_out.mean() - real_out.mean() + gradient_penalty
 
                     D_loss.backward()
                     if self.project_param['train_last_layer_only']:
@@ -143,7 +135,7 @@ class Trainer:
                     self.G_optim.zero_grad()
                     fake_out = self.D_net(fake)
 
-                    G_loss = self.loss_func(fake_out, real_label)
+                    G_loss = -fake_out.mean()
                     G_loss.backward()
                     if self.project_param['train_last_layer_only']:
                         self.G_net.module.scale_grad(0)
@@ -166,8 +158,10 @@ class Trainer:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--name', required=True)
+    parser.add_argument('-b', '--batch_scale', default=1, required=False)
     args = parser.parse_args()
     project_name = args.name
-    trainer = Trainer(project_name)
+    batch_scale = args.batch_scale
+    trainer = Trainer(project_name, batch_scale)
     trainer.load_module()
     trainer.start_training()
