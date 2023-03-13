@@ -1,8 +1,8 @@
 import torch
-from torch import nn, optim
+from torch import nn
 import math
-from PGAN_utils import EqualizedLR_Conv2d, PixelNorm, Minibatch_std
-from PGAN_utils import depth_to_size, size_to_depth
+from utils import EqualizedLR_Conv2d, PixelNorm, Minibatch_std
+from utils import depth_to_size, size_to_depth
 from config import Config
 import torch.nn.functional as F
 
@@ -15,14 +15,14 @@ def print_func(*args):
 def weights_init(w):
     classname = w.__class__.__name__
     if classname.find('Conv') != -1:
-        nn.init.kaiming_normal_(w.weight.data, a=0, mode='fan_in', nonlinearity='leaky_relu')
+        nn.init.normal_(w.weight.data, 0.0, 0.1)
 
     elif classname.find('BatchNorm2d') != -1:
-        nn.init.normal_(w.weight.data, 1.0, 0.02)
+        nn.init.normal_(w.weight.data, 0.0, 0.1)
         nn.init.constant_(w.bias.data, 0)
 
     elif classname.find('Linear') != -1:
-        nn.init.kaiming_normal_(w.weight.data, a=0, mode='fan_in', nonlinearity='leaky_relu')
+        nn.init.normal_(w.weight.data, 0.0, 0.1)
         nn.init.constant_(w.bias.data, 0)
 
 
@@ -91,7 +91,7 @@ class SA_Block(nn.Module):
     def __init__(self, kernel_size=7):
         super().__init__()
         self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2)
-        nn.init.normal_(self.conv.weight)
+        nn.init.xavier_uniform(self.conv.weight)
         nn.init.zeros_(self.conv.bias)
 
     def forward(self, x):
@@ -129,10 +129,6 @@ class G_Block(nn.Module):
         super().__init__()
         self.upsample = None
         self.residual = None
-        self.conv1_ECA = ECA_Block()
-        self.conv1_SA = SA_Block()
-        self.conv2_ECA = ECA_Block()
-        self.conv2_SA = SA_Block()
 
         if initial_block:
             self.conv1 = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(4, 4), stride=(1, 1), padding=(3, 3))
@@ -153,16 +149,12 @@ class G_Block(nn.Module):
     def forward(self, x):
         if self.upsample is not None:
             x = self.upsample(x)
-        # x = self.conv1(x*scale1)
-        residual_out = self.residual(x) if self.residual is not None else None
 
-        x = self.conv1_ECA(self.conv1(x))
-        x = self.conv1_SA(x)
+        residual_out = self.residual(x) if self.residual is not None else None
+        x = self.conv1(x)
         x = self.relu(x)
         x = self.pixel_norm(x)
-        # x = self.conv2(x*scale2)
-        x = self.conv2_ECA(self.conv2(x))
-        x = self.conv2_SA(x)
+        x = self.conv2(x)
         x = self.relu(x)
         if residual_out is not None:
             x = x + residual_out
@@ -181,18 +173,15 @@ class Generator(nn.Module):
         self.delta_alpha = 1e-3
         self.up_sample = nn.Upsample(scale_factor=2, mode='nearest')
         self.noise_net = Noise_Net(noise_dim, latent_size) if noise_net else None
-        self.current_net = nn.ModuleList([G_Block(latent_size, latent_size, initial_block=True, resnet=self.resnet)])
-        self.toRGBs = nn.ModuleList([ToRGB(latent_size, 3)])
+        self.current_net = nn.ModuleList([G_Block(latent_size, 512, initial_block=True, resnet=self.resnet)])
+        self.toRGBs = nn.ModuleList([ToRGB(512, 3)])
         self.out_res = out_res
         self.max_depth = size_to_depth(out_res)
 
-        # __add_layers(out_res)
         for d in range(2, int(math.log2(out_res))):
             if d < 6:
-                # low res blocks 8x8, 16x16, 32x32 with 512 channels
                 in_ch, out_ch = 512, 512
             else:
-                # from 64x64 (5th block), the number of channels halved for each block
                 in_ch, out_ch = int(512 / 2 ** (d - 6)), int(512 / 2 ** (d - 5))
 
             self.current_net.append(G_Block(in_ch, out_ch, resnet=self.resnet))
@@ -255,6 +244,11 @@ class Generator(nn.Module):
                 if param.grad is not None:
                     param.grad *= factor
 
+    def scale_grad_rgb(self, factor=0.5):
+        for param in self.toRGBs[self._current_depth - 1].parameters():
+            if param.grad is not None:
+                param.grad *= factor
+
     def scale_grad_noise(self, factor=0.5):
         for param in self.noise_net.parameters():
             if param.grad is not None:
@@ -264,10 +258,6 @@ class Generator(nn.Module):
 class D_Block(nn.Module):
     def __init__(self, in_ch, out_ch, final_block=False, resnet=False):
         super().__init__()
-        self.conv1_ECA = ECA_Block()
-        self.conv1_SA = SA_Block()
-        self.conv2_ECA = ECA_Block()
-        self.conv2_SA = SA_Block()
         self.residual = None
 
         if final_block:
@@ -298,11 +288,9 @@ class D_Block(nn.Module):
             x = self.minibatchstd(x)
 
         residual_out = self.residual(x) if self.residual is not None else None
-        x = self.conv1_ECA(self.conv1(x))
-        x = self.conv1_SA(x)
+        x = self.conv1(x)
         x = self.relu(x)
-        x = self.conv2_ECA(self.conv2(x))
-        x = self.conv2_SA(x)
+        x = self.conv2(x)
         if residual_out is not None:
             x = x + residual_out
 
@@ -324,6 +312,7 @@ class Discriminator(nn.Module):
         self.fromRGBs = nn.ModuleList([])
         self._internal_index = self._max_depth - self._current_depth
         self.resnet = resnet
+        self.train_last_layer_only = False
 
         print_func("max_depth: {}".format(self._max_depth))
         dim_list = []
@@ -341,8 +330,8 @@ class Discriminator(nn.Module):
             self.current_net.append(D_Block(in_ch, out_ch, resnet=self.resnet))
             self.fromRGBs.append(FromRGB(3, in_ch))
 
-        self.current_net.append(D_Block(latent_size, latent_size, final_block=True, resnet=self.resnet))
-        self.fromRGBs.append(FromRGB(3, latent_size))
+        self.current_net.append(D_Block(512, 512, final_block=True, resnet=self.resnet))
+        self.fromRGBs.append(FromRGB(3, 512))
 
     def forward(self, x_rgb):
         print_func("start forward......")
@@ -360,8 +349,6 @@ class Discriminator(nn.Module):
             x_rgb = self.down_sample(x_rgb)
             x_old = self.fromRGBs[self._internal_index + 1](x_rgb)
             x = (1 - self.alpha) * x_old + self.alpha * x
-            # self.alpha += self.delta_alpha
-            # self.alpha = min(self.alpha, 1)
 
         for block in self.current_net[self._internal_index + 1:]:
             print_func(x.shape)

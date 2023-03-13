@@ -48,4 +48,3 @@ def depth_to_size(depth):
 
 def size_to_depth(size):
     return int(math.log2(size) - 1)
-

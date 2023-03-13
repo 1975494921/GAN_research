@@ -1,6 +1,6 @@
 from WPGAN_models import Discriminator, Generator
 from config import Config
-from PGAN_utils import size_to_depth, depth_to_size
+from utils import size_to_depth, depth_to_size
 import torch
 import os
 import argparse
@@ -54,7 +54,7 @@ class Trainer:
         # start_depth = model_state_dict['current_depth']
         self.G_optim = optim.Adam(self.G_net.parameters(), lr=self.project_param['G_lr'], betas=(0, 0.99))
         self.D_optim = optim.Adam(self.D_net.parameters(), lr=self.project_param['D_lr'], betas=(0, 0.99))
-        self.loss_func = nn.BCELoss()
+
         torch.set_default_tensor_type(torch.FloatTensor)
 
     def load_module(self):
@@ -63,27 +63,30 @@ class Trainer:
             model_state_dict = torch.load(pretrained_file, map_location=torch.device(Config.devices[0]))
             self.G_net.load_state_dict(model_state_dict['G_net'], strict=True)
             self.D_net.load_state_dict(model_state_dict['D_net'], strict=True)
+
             print("Loaded model file: {}".format(pretrained_file))
             if self.project_param['Use_last_alpha']:
                 self.project_param['alpha_list'][model_state_dict['current_depth']] = model_state_dict['alpha']
 
             del model_state_dict
 
-    def dump_model(self, depth):
+    def dump_model(self, depth, step):
         save_dict = {'G_net': self.G_net.state_dict(), 'D_net': self.D_net.state_dict(), 'current_depth': depth,
-                     'noise_size': 256, 'latent_size': 512, 'alpha': self.G_net.module.get_alpha()}
+                     'noise_size': 256, 'latent_size': self.latent_dim, 'alpha': self.G_net.module.get_alpha()}
         save_path = os.path.join(self.model_dir, "model_{}.pth".format(depth))
         torch.save(save_dict, save_path)
+
+        if step % 30000 == 0:
+            save_path = os.path.join(self.model_dir, "model_{}_{}.pth".format(depth, step))
+            torch.save(save_dict, save_path)
 
     def start_training(self):
         print("start training...")
         for depth in range(self.start_depth, self.end_depth + 1):
-            Use_Mean = True if self.project_param['Use_Mean'] else False
             batch_size = int(self.batch_list[depth] * self.batch_scale)
             img_size = depth_to_size(depth)
             transform = transforms.Compose([
-                transforms.Resize(max(img_size, 128)),
-                transforms.CenterCrop(img_size),
+                transforms.Resize((img_size, img_size)),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ])
@@ -93,11 +96,13 @@ class Trainer:
             self.G_net.module.set_depth(depth, alpha_start=self.alpha_list[depth], delta_alpha=self.delta_alpha)
             self.D_net.module.set_depth(depth, alpha_start=self.alpha_list[depth], delta_alpha=self.delta_alpha)
 
-            for epo in range(1, self.epos_list[depth] + 1):
+            print("Batch Size: {}".format(batch_size))
+            step = 0
+            for epo in range(self.epos_list[depth]):
                 for batch_ndx, sample in enumerate(data_loader):
+                    step += 1
                     sample = sample[0].to(Config.devices[1])
 
-                    # update D
                     self.D_optim.zero_grad()
                     if self.noise_net:
                         noise = torch.randn(sample.shape[0], self.nz_dim).to(Config.devices[0])
@@ -108,7 +113,8 @@ class Trainer:
                     fake_out = self.D_net(fake.detach())
                     real_out = self.D_net(sample)
 
-                    ## Gradient Penalty
+                    # update D
+                    # Gradient Penalty
                     eps = torch.rand(sample.shape[0], 1, 1, 1).to(Config.devices[1])
                     eps = eps.expand_as(sample)
                     x_hat = eps * sample + (1 - eps) * fake.detach()
@@ -124,14 +130,13 @@ class Trainer:
 
                     # Wasserstein distance
                     D_loss = fake_out.mean() - real_out.mean() + gradient_penalty
-
                     D_loss.backward()
                     if self.project_param['train_last_layer_only']:
                         self.D_net.module.scale_grad(0)
 
                     self.D_optim.step()
 
-                    ## update G
+                    # update G
                     self.G_optim.zero_grad()
                     fake_out = self.D_net(fake)
 
@@ -139,20 +144,19 @@ class Trainer:
                     G_loss.backward()
                     if self.project_param['train_last_layer_only']:
                         self.G_net.module.scale_grad(0)
-                        self.G_net.module.scale_grad_noise(0)
 
                     self.G_optim.step()
 
-                    ##############
-                    print("\r Epo: {}; G_loss: {:.4f}; D_loss: {:.4f}; Alpha: [{:.3f}, {:.3f}]".format(epo, G_loss.mean(),
+                    print("\r Step: {}; G_loss: {:.4f}; D_loss: {:.4f}; Alpha: [{:.3f}, {:.3f}]".format(step, G_loss.mean(),
                             D_loss.mean().item(), self.G_net.module.get_alpha(), self.D_net.module.get_alpha()), end="")
 
-                if epo % self.save_internal[depth] == 0:
-                    self.dump_model(depth)
-                    print("\n Model saves at Depth: {}; Epoch: {}".format(depth, epo))
+                    if step % self.save_internal[depth] == 0:
+                        self.dump_model(depth, step)
+                        print("\n Model saves at Depth: {}; Step: {}".format(depth, step))
 
-                self.G_net.module.increase_alpha()
-                self.D_net.module.increase_alpha()
+                    if step % 20 == 0:
+                        self.G_net.module.increase_alpha()
+                        self.D_net.module.increase_alpha()
 
 
 if __name__ == '__main__':
