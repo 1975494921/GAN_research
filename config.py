@@ -97,7 +97,6 @@ class Config:
         'D_lr': 0.0001,
         'latent_dim': 256,
 
-        # 'data_dir': '/scratch/zceelil/dataset/cartoon/anime-faces-256',
         'data_dir': '/scratch/zceelil/dataset/cartoon/img_512',
         'epos_list': [0, 1000, 100, 100, 100, 100, 100, 100, 100, 100],
         'batch_list': [0, 50, 50, 50, 50, 50, 30, 40, 40, 40],
