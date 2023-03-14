@@ -4,29 +4,29 @@ import torch.nn.functional as F
 import math
 
 
-class EqualizedLR_Conv2d(nn.Module):
-    def __init__(self, in_ch, out_ch, kernel_size, stride=1, padding=0):
-        super().__init__()
-        self.padding = padding
+class EqLR_Conv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=(1, 1), padding=(0, 0)):
+        super(EqLR_Conv2d, self).__init__()
         self.stride = stride
-        self.scale = math.sqrt(2 / (in_ch * kernel_size[0] * kernel_size[1]))
+        self.padding = padding
 
-        self.weight = nn.Parameter(torch.Tensor(out_ch, in_ch, *kernel_size))
-        self.bias = nn.Parameter(torch.Tensor(out_ch))
+        # Compute the scaling factor for the weights
+        fan_in = in_channels * kernel_size[0] * kernel_size[1]
+        self.scale = (2 / fan_in) ** 0.5
 
+        # Initialize the weight and bias parameters
+        self.weight = nn.Parameter(torch.Tensor(out_channels, in_channels, *kernel_size))
+        self.bias = nn.Parameter(torch.Tensor(out_channels))
+
+        # Initialize the weight and bias parameters using normal and zeros initialization, respectively
         nn.init.normal_(self.weight)
         nn.init.zeros_(self.bias)
 
     def forward(self, x):
-        return F.conv2d(x, self.weight * self.scale, self.bias, self.stride, self.padding)
+        # Scale the weight parameter by the scaling factor and perform the convolution operation
+        out = F.conv2d(x, self.weight * self.scale, self.bias, self.stride, self.padding)
 
-
-class PixelNorm(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return x / torch.sqrt(torch.sum(x ** 2, dim=1, keepdim=True) + 10e-8)
+        return out
 
 
 class Minibatch_std(nn.Module):
@@ -34,12 +34,22 @@ class Minibatch_std(nn.Module):
         super().__init__()
 
     def forward(self, x):
-        size = list(x.size())
+        # Get the size of the input tensor
+        size = list(x.shape)
+
+        # set the feature dimension to 1, occupying the first dimension
         size[1] = 1
 
+        # compute the standard deviation of each feature across the mini-batch
         std = torch.std(x, dim=0)
-        mean = torch.mean(std)
-        return torch.cat((x, mean.repeat(size)), dim=1)
+
+        # create a tensor with the mean standard deviation repeated along the feature dimension
+        mean_std = torch.mean(std).expand(tuple(size))
+
+        # concatenate the input tensor with the mean standard deviation tensor along the feature dimension
+        out = torch.cat([x, mean_std], dim=1)
+
+        return out
 
 
 def depth_to_size(depth):

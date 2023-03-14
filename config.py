@@ -130,3 +130,26 @@ class Config:
 
         'train_last_layer_only': False,
     }
+
+    Project_Params['test_project1'] = {
+        'load_depth': 7,
+        'start_depth': 7,
+        'end_depth': size_to_depth(512),
+
+        'Use_last_alpha': True,
+        'Use_Mean': True,
+        'Noise_Net': False,
+        'Resnet': False,
+        'G_lr': 0.0002,
+        'D_lr': 0.0002,
+        'latent_dim': 256,
+
+        'data_dir': '/scratch/zceelil/dataset/portrait',
+        'epos_list': [0, 1000, 100, 100, 100, 10000, 10000, 10000, 10000, 10000],
+        'batch_list': [0, 50, 50, 50, 40, 80, 80, 80, 80, 80],
+        'save_internal': [10000, 10000, 10000, 2000, 2000, 5000, 5000, 5000, 5000, 5000],
+        'alpha_list': [0, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
+        'delta_alpha': 0.0002,
+
+        'train_last_layer_only': False,
+    }

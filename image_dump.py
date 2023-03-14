@@ -9,12 +9,11 @@ import math
 import numpy as np
 
 torch.manual_seed(0)
-
 num_generate = 16
 num_grid = 9
-img_size = 256
+img_size = 512
 model_root = 'model_trains'
-model_key = "portrait_project1"
+model_key = "anime_project1"
 model_dir = os.path.join(model_root, model_key)
 
 device_ids = [0, 1]

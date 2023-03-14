@@ -1,21 +1,38 @@
+"""
+https://github.com/ziwei-jiang/PGGAN-PyTorch
+"""
 import torch
 from torch import nn
 import math
-from utils import EqualizedLR_Conv2d, PixelNorm, Minibatch_std
+from utils import EqLR_Conv2d, Minibatch_std
 from utils import depth_to_size, size_to_depth
 from config import Config
 import torch.nn.functional as F
 
 
 def print_func(*args):
+    # use this function to print debug information
     if Config.debug:
         print(*args)
 
 
 def weights_init(w):
+    """
+    Initialize the weights of the network
+
+    Parameters
+    ----------
+    w: nn.Module
+        the network to be initialized
+
+    References
+    ----------
+    This code is written on my own
+    """
     classname = w.__class__.__name__
     if classname.find('Conv') != -1:
         nn.init.normal_(w.weight.data, 0.0, 0.1)
+        nn.init.constant_(w.bias.data, 0)
 
     elif classname.find('BatchNorm2d') != -1:
         nn.init.normal_(w.weight.data, 0.0, 0.1)
@@ -26,43 +43,83 @@ def weights_init(w):
         nn.init.constant_(w.bias.data, 0)
 
 
-class FromRGB(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.conv = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(1, 1), stride=(1, 1))
-        self.relu = nn.LeakyReLU(0.2)
-
-    def forward(self, x):
-        x = self.conv(x)
-        return self.relu(x)
-
-
-class ToRGB(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.conv = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(1, 1), stride=(1, 1))
-
-    def forward(self, x):
-        return self.conv(x)
-
-
 class Noise_Net(nn.Module):
+    """
+    Preprocess the noise vector to make the generator more stable
+
+    Parameters
+    ----------
+    in_dim: int
+        the dimension of the noise vector
+    out_dim: int
+        the dimension of the output noise vector
+
+    References
+    ----------
+    The code is written on my own
+    """
     def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
-        hidden = int(in_dim / 2)
+        hidden = int(in_dim // 2)
         self.FN = nn.Sequential(
             nn.Linear(in_dim, hidden),
             nn.LeakyReLU(0.2),
-            nn.Dropout(0.2),
+            nn.Dropout(0.3),
             nn.Linear(hidden, out_dim),
-            nn.LeakyReLU(0.2),
         )
         self.FN.apply(weights_init)
 
     def forward(self, x):
         x = self.FN(x)
-        out = x.unsqueeze(-1).unsqueeze(-1)
-        return out
+        return x
+
+
+class FromRGB(nn.Module):
+    """
+    The layer to convert the RGB image to the feature map for the discriminator
+
+    Parameters
+    ----------
+    in_channel: int
+        the number of input channels
+    out_channel: int
+        the number of output channels
+
+    References
+    ----------
+    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
+    """
+    def __init__(self, in_channel, out_channel):
+        super().__init__()
+        self.conv = EqLR_Conv2d(in_channel, out_channel, kernel_size=(1, 1))
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = F.leaky_relu(x, 0.2)
+        return x
+
+
+class ToRGB(nn.Module):
+    """
+    The layer to convert the feature map to the RGB image for the generator
+
+    Parameters
+    ----------
+    in_channel: int
+        the number of input channels
+    out_channel: int
+        the number of output channels
+
+    References
+    ----------
+    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
+    """
+    def __init__(self, in_channel, out_channel):
+        super().__init__()
+        self.conv = EqLR_Conv2d(in_channel, out_channel, kernel_size=(1, 1))
+
+    def forward(self, x):
+        return self.conv(x)
 
 
 class ECA_Block(nn.Module):
@@ -71,7 +128,7 @@ class ECA_Block(nn.Module):
         super().__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False)
-        nn.init.normal_(self.conv.weight)
+        nn.init.xavier_uniform(self.conv.weight)
 
     def forward(self, x):
         # feature descriptor on the global spatial information
@@ -105,95 +162,160 @@ class SA_Block(nn.Module):
 
 
 class Residual_Block(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    """
+    The residual block for the generator
+
+    Parameters
+    ----------
+    direct: nn.Module
+        the direct path of the residual block
+    in_channel: int
+        the number of input channels
+    out_channel: int
+        the number of output channels
+    kernel_size: tuple
+        the size of the kernel
+    stride: tuple
+        the stride of the convolution
+    padding: tuple
+        the padding of the convolution
+
+    References
+    ----------
+    The code is written on my own
+    """
+    def __init__(self, direct, in_channel, out_channel, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)):
         super().__init__()
-        self.residual = None
-        self.ECA = None
-        self.SA = None
-        if in_ch != out_ch:
-            self.residual = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-            self.ECA = ECA_Block()
-            self.SA = SA_Block()
+        self.direct = direct
+        self.residual = nn.Identity()
+        if in_channel != out_channel:
+            self.residual = EqLR_Conv2d(in_channel, out_channel,
+                                        kernel_size=kernel_size, stride=stride, padding=padding)
 
     def forward(self, x):
-        if self.residual is not None:
-            x = self.residual(x)
-            x = self.ECA(x)
-            x = self.SA(x)
-
-        return x
+        out = self.direct(x)
+        return out + self.residual(x)
 
 
 class G_Block(nn.Module):
-    def __init__(self, in_ch, out_ch, initial_block=False, resnet=False):
+    """
+    The basic block of the Generator
+
+    Parameters
+    ----------
+    in_channel: int
+        the number of input channels
+    out_channel: int
+        the number of output channels
+    initial_block: bool
+        indicate whether it is the initial block
+    resnet: bool
+        indicate whether it is the residual block
+
+    References
+    ----------
+    The idea of the code is from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
+    The parameters of the Progressive GAN are from https://arxiv.org/pdf/1710.10196.pdf
+
+    There are serval improvements I made:
+    1. The residual connection is added to the basic block
+    2. The upsampling is replaced by nn.Identity() in the initial block, the code is more concise
+    """
+    def __init__(self, in_channel, out_channel, initial_block=False, resnet=False):
         super().__init__()
-        self.upsample = None
-        self.residual = None
+        self.upsample = nn.Identity()
 
         if initial_block:
-            self.conv1 = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(4, 4), stride=(1, 1), padding=(3, 3))
+            self.conv1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(4, 4), stride=(1, 1), padding=(3, 3))
         else:
             self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
-            if resnet:
-                self.residual = Residual_Block(in_ch, out_ch)
-            self.conv1 = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            self.conv1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
 
-        self.conv2 = EqualizedLR_Conv2d(out_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        self.relu = nn.LeakyReLU(0.2)
-        self.pixel_norm = PixelNorm()
-        nn.init.normal_(self.conv1.weight)
-        nn.init.normal_(self.conv2.weight)
-        nn.init.zeros_(self.conv1.bias)
-        nn.init.zeros_(self.conv2.bias)
+        self.conv2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        if resnet:
+            self.conv1 = Residual_Block(self.conv1, in_channel, out_channel)
+            self.conv2 = Residual_Block(self.conv2, out_channel, out_channel)
+
+        self.apply(weights_init)
+
+    def PixelNorm(self, x):
+        return x / torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + 1e-8)
 
     def forward(self, x):
-        if self.upsample is not None:
-            x = self.upsample(x)
-
-        residual_out = self.residual(x) if self.residual is not None else None
+        x = self.upsample(x)
         x = self.conv1(x)
-        x = self.relu(x)
-        x = self.pixel_norm(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.PixelNorm(x)
         x = self.conv2(x)
-        x = self.relu(x)
-        if residual_out is not None:
-            x = x + residual_out
-
-        x = self.pixel_norm(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.PixelNorm(x)
         return x
 
 
 class Generator(nn.Module):
+    """
+    The Generator class of the Progressive GAN
+
+    Parameters
+    ----------
+    noise_dim: int
+        the dimension of the noise
+    latent_size: int
+        the dimension of the latent vector
+    out_res: int
+        the output resolution of the generator
+    noise_net: nn.Module
+        indicate whether to use the noise network
+    resnet: bool
+        indicate whether to use the residual block
+
+    References
+    ----------
+    The idea of the code is from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
+
+    To fit my project requirements, I changed the whole structure of the code and added some features:
+    1. The noise network is allowed to be used, which means the noise is not simply from the random normal distribution,
+       this is a good way to improve the quality of the generated images.
+
+    2. The residual block is allowed to be used, which means the generator is allowed to be deeper.
+
+    3. The control of the alpha is added, which means the alpha can be changed during the training process, instead of
+       just being from 0 to 1 when the training starts. The speed of the alpha change can also be controlled.
+
+    4. In the training process, the gradient on different layers can be scaled, which means the training process can be
+       more stable if new layers are added, or the previous layers are frozen.
+
+    5. The depth setting is added, which means the depth of the generator can be changed during the training process,
+         instead of just being from 1 to the max depth when the training starts. This allows the generator to be more flexible.
+    """
     def __init__(self, noise_dim, latent_size, out_res, noise_net=False, resnet=False):
         super().__init__()
         self.resnet = resnet
-
-        self._current_depth = 1  # starting from 1, 4x4
+        self._current_depth = 1
         self.alpha = 0.1
         self.delta_alpha = 1e-3
         self.up_sample = nn.Upsample(scale_factor=2, mode='nearest')
-        self.noise_net = Noise_Net(noise_dim, latent_size) if noise_net else None
+        self.noise_net = nn.Identity()
         self.current_net = nn.ModuleList([G_Block(latent_size, 512, initial_block=True, resnet=self.resnet)])
         self.toRGBs = nn.ModuleList([ToRGB(512, 3)])
         self.out_res = out_res
         self.max_depth = size_to_depth(out_res)
 
+        if noise_net:
+            self.noise_net = Noise_Net(noise_dim, latent_size)
+
         for d in range(2, int(math.log2(out_res))):
             if d < 6:
-                in_ch, out_ch = 512, 512
+                in_channel, out_channel = 512, 512
             else:
-                in_ch, out_ch = int(512 / 2 ** (d - 6)), int(512 / 2 ** (d - 5))
+                in_channel, out_channel = int(512 / 2 ** (d - 6)), int(512 / 2 ** (d - 5))
 
-            self.current_net.append(G_Block(in_ch, out_ch, resnet=self.resnet))
-            self.toRGBs.append(ToRGB(out_ch, 3))
+            self.current_net.append(G_Block(in_channel, out_channel, resnet=self.resnet))
+            self.toRGBs.append(ToRGB(out_channel, 3))
 
     def forward(self, noise):
-        if self.noise_net is not None:
-            x = self.noise_net(noise)
-        else:
-            x = noise.unsqueeze(-1).unsqueeze(-1)
-
-        # x = noise
+        noise = self.noise_net(noise)
+        x = noise.unsqueeze(-1).unsqueeze(-1)
         for block in self.current_net[:int(self._current_depth) - 1]:
             x = block(x)
 
@@ -256,46 +378,64 @@ class Generator(nn.Module):
 
 
 class D_Block(nn.Module):
-    def __init__(self, in_ch, out_ch, final_block=False, resnet=False):
-        super().__init__()
-        self.residual = None
+    """
+    The discriminator block is a convolutional block with a minibatch standard deviation layer, which is used to
+    calculate the standard deviation of the feature maps of the current layer.
 
-        if final_block:
+    Parameters
+    ----------
+    in_channel: int
+        The number of input channels.
+    out_channel: int
+        The number of output channels.
+    last_block: bool
+        Whether the block is the final block of the discriminator.
+    resnet: bool
+        Whether the block is a residual block.
+
+    References
+    ----------
+    The idea of the code is from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
+    The parameters of the Progressive GAN are from https://arxiv.org/pdf/1710.10196.pdf
+
+    """
+    def __init__(self, in_channel, out_channel, last_block=False, resnet=False):
+        super().__init__()
+        self.minibatchstd = nn.Identity()
+        self.resnet = resnet
+
+        if last_block:
             self.minibatchstd = Minibatch_std()
-            self.conv1 = EqualizedLR_Conv2d(in_ch + 1, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-            self.conv2 = EqualizedLR_Conv2d(out_ch, out_ch, kernel_size=(4, 4), stride=(1, 1))
+            self.conv1 = EqLR_Conv2d(in_channel + 1, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            self.conv2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(4, 4), stride=(1, 1))
             self.outlayer = nn.Sequential(
                 nn.Flatten(),
-                nn.Linear(out_ch, 1),
+                nn.Linear(out_channel, 1)
             )
-        else:
-            self.minibatchstd = None
-            if resnet:
-                self.residual = Residual_Block(in_ch, out_ch)
 
-            self.conv1 = EqualizedLR_Conv2d(in_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-            self.conv2 = EqualizedLR_Conv2d(out_ch, out_ch, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            if self.resnet:
+                self.conv1 = Residual_Block(self.conv1, in_channel + 1, out_channel)
+
+                self.conv2 = Residual_Block(self.conv2, out_channel, out_channel)
+        else:
+            self.conv1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            self.conv2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
             self.outlayer = nn.AvgPool2d(kernel_size=(2, 2), stride=(2, 2))
 
-        self.relu = nn.LeakyReLU(0.2)
-        nn.init.normal_(self.conv1.weight)
-        nn.init.normal_(self.conv2.weight)
-        nn.init.zeros_(self.conv1.bias)
-        nn.init.zeros_(self.conv2.bias)
+            if self.resnet:
+                self.conv1 = Residual_Block(self.conv1, in_channel, out_channel)
+                self.conv2 = Residual_Block(self.conv2, out_channel, out_channel)
+
+        self.apply(weights_init)
 
     def forward(self, x):
-        if self.minibatchstd is not None:
-            x = self.minibatchstd(x)
-
-        residual_out = self.residual(x) if self.residual is not None else None
+        x = self.minibatchstd(x)
         x = self.conv1(x)
-        x = self.relu(x)
+        x = F.leaky_relu(x, 0.2)
         x = self.conv2(x)
-        if residual_out is not None:
-            x = x + residual_out
-
-        x = self.relu(x)
+        x = F.leaky_relu(x, 0.2)
         x = self.outlayer(x)
+
         return x
 
 
@@ -318,19 +458,19 @@ class Discriminator(nn.Module):
         dim_list = []
         for d in range(1, size_to_depth(img_size)):
             if d < 4:
-                in_ch, out_ch = 512, 512
+                in_channel, out_channel = 512, 512
             else:
-                in_ch, out_ch = int(512 / 2 ** (d - 3)), int(512 / 2 ** (d - 4))
+                in_channel, out_channel = int(512 / 2 ** (d - 3)), int(512 / 2 ** (d - 4))
 
-            dim_list.append((in_ch, out_ch))
+            dim_list.append((in_channel, out_channel))
 
         dim_list.reverse()
-        for in_ch, out_ch in dim_list:
-            print_func(in_ch, out_ch)
-            self.current_net.append(D_Block(in_ch, out_ch, resnet=self.resnet))
-            self.fromRGBs.append(FromRGB(3, in_ch))
+        for in_channel, out_channel in dim_list:
+            print_func(in_channel, out_channel)
+            self.current_net.append(D_Block(in_channel, out_channel, resnet=self.resnet))
+            self.fromRGBs.append(FromRGB(3, in_channel))
 
-        self.current_net.append(D_Block(512, 512, final_block=True, resnet=self.resnet))
+        self.current_net.append(D_Block(512, 512, last_block=True, resnet=self.resnet))
         self.fromRGBs.append(FromRGB(3, 512))
 
     def forward(self, x_rgb):

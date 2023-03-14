@@ -7,7 +7,6 @@ import argparse
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from torchvision.utils import make_grid, save_image
 from torchvision import datasets
 
 print("CUDA_HOME :{}".format(os.environ.get('CUDA_HOME')))
@@ -46,7 +45,8 @@ class Trainer:
             project_exist = False
 
         print("Project Exist: {}".format(project_exist))
-        G_net = Generator(self.nz_dim, self.latent_dim, 1024, noise_net=self.noise_net, resnet=self.resnet).to(Config.devices[0])
+        G_net = Generator(self.nz_dim, self.latent_dim, 1024, noise_net=self.noise_net, resnet=self.resnet).to(
+            Config.devices[0])
         self.G_net = nn.DataParallel(G_net, device_ids=Config.device_groups[0])
         D_net = Discriminator(self.latent_dim, 1024, resnet=self.resnet).to(Config.devices[1])
         self.D_net = nn.DataParallel(D_net, device_ids=Config.device_groups[1])
@@ -147,8 +147,12 @@ class Trainer:
 
                     self.G_optim.step()
 
-                    print("\r Step: {}; G_loss: {:.4f}; D_loss: {:.4f}; Alpha: [{:.3f}, {:.3f}]".format(step, G_loss.mean(),
-                            D_loss.mean().item(), self.G_net.module.get_alpha(), self.D_net.module.get_alpha()), end="")
+                    print("\r Step: {}; G_loss: {:.4f}; D_loss: {:.4f}; Alpha: [{:.3f}, {:.3f}]".format(step,
+                                                                                                        G_loss.mean(),
+                                                                                                        D_loss.mean().item(),
+                                                                                                        self.G_net.module.get_alpha(),
+                                                                                                        self.D_net.module.get_alpha()),
+                          end="")
 
                     if step % self.save_internal[depth] == 0:
                         self.dump_model(depth, step)
