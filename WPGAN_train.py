@@ -45,9 +45,10 @@ class Trainer:
             project_exist = False
 
         print("Project Exist: {}".format(project_exist))
-        G_net = Generator(self.nz_dim, self.latent_dim, 1024, noise_net=self.noise_net, resnet=self.resnet).to(
-            Config.devices[0])
+        G_net = Generator(self.nz_dim, self.latent_dim, 1024,
+                          noise_net=self.noise_net, resnet=self.resnet).to(Config.devices[0])
         self.G_net = nn.DataParallel(G_net, device_ids=Config.device_groups[0])
+
         D_net = Discriminator(self.latent_dim, 1024, resnet=self.resnet).to(Config.devices[1])
         self.D_net = nn.DataParallel(D_net, device_ids=Config.device_groups[1])
 
@@ -71,6 +72,12 @@ class Trainer:
             del model_state_dict
 
     def dump_model(self, depth, step):
+        """
+
+        :param depth:
+        :param step:
+        :return:
+        """
         save_dict = {'G_net': self.G_net.state_dict(), 'D_net': self.D_net.state_dict(), 'current_depth': depth,
                      'noise_size': 256, 'latent_size': self.latent_dim, 'alpha': self.G_net.module.get_alpha()}
         save_path = os.path.join(self.model_dir, "model_{}.pth".format(depth))
@@ -81,6 +88,34 @@ class Trainer:
             torch.save(save_dict, save_path)
 
     def d_loss_fn(self, net, real_out, fake_out, real_samples, fake_samples, gp_lambda=10.0, device=Config.devices[1]):
+        """
+        Implementation of the WGAN-GP loss function for the discriminator.
+
+        Parameters
+        ----------
+        net : torch.nn.Module
+            The discriminator network.
+        real_out : torch.Tensor
+            The output of the discriminator for the real samples.
+        fake_out : torch.Tensor
+            The output of the discriminator for the fake samples.
+        real_samples : torch.Tensor
+            The real samples from the dataset.
+        fake_samples : torch.Tensor
+            The fake samples from the generator.
+        gp_lambda : float
+            The gradient penalty lambda hyperparameter.
+        device : torch.device
+            The device to use for the gradient penalty calculation.
+
+        References
+        ----------
+        The idea of gradient penalty is from the paper "Improved Training of Wasserstein GANs" by Gulrajani et al.
+        https://arxiv.org/abs/1704.00028
+
+        The implementation is based on the PyTorch implementation:
+        https://github.com/EmilienDupont/wgan-gp/blob/master/training.py
+        """
         batch_size = real_out.size(0)
 
         # Calculate Wasserstein distance
@@ -96,16 +131,18 @@ class Trainer:
             outputs=interp_out,
             grad_outputs=torch.ones(interp_out.size()).to(device),
             create_graph=True,
-            retain_graph=False,
+            retain_graph=True,
         )[0]
         grad_norm = gradients.view(batch_size, -1).norm(2, dim=1)
         gradient_penalty = gp_lambda * ((grad_norm - 1) ** 2).mean()
 
         # Compute total loss
-        d_loss = wasserstein_distance + gradient_penalty
-        return d_loss
+        return wasserstein_distance + gradient_penalty
 
     def start_training(self):
+        """
+        Start training the model.
+        """
         print("start training...")
         for depth in range(self.start_depth, self.end_depth + 1):
             batch_size = int(self.batch_list[depth] * self.batch_scale)
