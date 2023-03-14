@@ -80,6 +80,31 @@ class Trainer:
             save_path = os.path.join(self.model_dir, "model_{}_{}.pth".format(depth, step))
             torch.save(save_dict, save_path)
 
+    def d_loss_fn(self, net, real_out, fake_out, real_samples, fake_samples, gp_lambda=10.0, device=Config.devices[1]):
+        batch_size = real_out.size(0)
+
+        # Calculate Wasserstein distance
+        wasserstein_distance = fake_out.mean() - real_out.mean()
+
+        # Calculate gradient penalty
+        alpha = torch.rand(batch_size, 1, 1, 1).expand(real_samples.shape).to(device)
+        interp_samples = alpha * real_samples + (1 - alpha) * fake_samples.detach()
+        interp_samples.requires_grad = True
+        interp_out = net(interp_samples)
+        gradients = torch.autograd.grad(
+            inputs=interp_samples,
+            outputs=interp_out,
+            grad_outputs=torch.ones(interp_out.size()).to(device),
+            create_graph=True,
+            retain_graph=False,
+        )[0]
+        grad_norm = gradients.view(batch_size, -1).norm(2, dim=1)
+        gradient_penalty = gp_lambda * ((grad_norm - 1) ** 2).mean()
+
+        # Compute total loss
+        d_loss = wasserstein_distance + gradient_penalty
+        return d_loss
+
     def start_training(self):
         print("start training...")
         for depth in range(self.start_depth, self.end_depth + 1):
@@ -113,23 +138,8 @@ class Trainer:
                     fake_out = self.D_net(fake.detach())
                     real_out = self.D_net(sample)
 
-                    # update D
-                    # Gradient Penalty
-                    eps = torch.rand(sample.shape[0], 1, 1, 1).to(Config.devices[1])
-                    eps = eps.expand_as(sample)
-                    x_hat = eps * sample + (1 - eps) * fake.detach()
-                    x_hat.requires_grad = True
-                    px_hat = self.D_net(x_hat)
-                    grad = torch.autograd.grad(
-                        outputs=px_hat.sum(),
-                        inputs=x_hat,
-                        create_graph=True
-                    )[0]
-                    grad_norm = grad.view(sample.shape[0], -1).norm(2, dim=1)
-                    gradient_penalty = 10 * ((grad_norm - 1) ** 2).mean()
-
                     # Wasserstein distance
-                    D_loss = fake_out.mean() - real_out.mean() + gradient_penalty
+                    D_loss = self.d_loss_fn(self.D_net, real_out, fake_out, sample, fake)
                     D_loss.backward()
                     if self.project_param['train_last_layer_only']:
                         self.D_net.module.scale_grad(0)

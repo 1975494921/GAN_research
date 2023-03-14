@@ -52,6 +52,21 @@ class Minibatch_std(nn.Module):
         return out
 
 
+# class PixelNorm(nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#
+#     def forward(self, x):
+#         return x / torch.sqrt(torch.sum(x ** 2, dim=1, keepdim=True) + 10e-8)
+
+class PixelNorm(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        sigma = torch.sum(x ** 2, dim=1, keepdim=True)
+        return x / torch.sqrt(sigma + 10e-8)
+
 def depth_to_size(depth):
     return int(2 ** (depth + 1))
 

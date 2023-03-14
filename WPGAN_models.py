@@ -4,7 +4,7 @@ https://github.com/ziwei-jiang/PGGAN-PyTorch
 import torch
 from torch import nn
 import math
-from utils import EqLR_Conv2d, Minibatch_std
+from utils import EqLR_Conv2d, Minibatch_std, PixelNorm
 from utils import depth_to_size, size_to_depth
 from config import Config
 import torch.nn.functional as F
@@ -224,6 +224,7 @@ class G_Block(nn.Module):
     def __init__(self, in_channel, out_channel, initial_block=False, resnet=False):
         super().__init__()
         self.upsample = nn.Identity()
+        self.pixel_norm = PixelNorm()
 
         if initial_block:
             self.conv1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(4, 4), stride=(1, 1), padding=(3, 3))
@@ -238,17 +239,14 @@ class G_Block(nn.Module):
 
         self.apply(weights_init)
 
-    def PixelNorm(self, x):
-        return x / torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + 1e-8)
-
     def forward(self, x):
         x = self.upsample(x)
         x = self.conv1(x)
         x = F.leaky_relu(x, 0.2)
-        x = self.PixelNorm(x)
+        x = self.pixel_norm(x)
         x = self.conv2(x)
         x = F.leaky_relu(x, 0.2)
-        x = self.PixelNorm(x)
+        x = self.pixel_norm(x)
         return x
 
 
