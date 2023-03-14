@@ -113,23 +113,8 @@ class Trainer:
                     fake_out = self.D_net(fake.detach())
                     real_out = self.D_net(sample)
 
-                    # update D
-                    # Gradient Penalty
-                    eps = torch.rand(sample.shape[0], 1, 1, 1).to(Config.devices[1])
-                    eps = eps.expand_as(sample)
-                    x_hat = eps * sample + (1 - eps) * fake.detach()
-                    x_hat.requires_grad = True
-                    px_hat = self.D_net(x_hat)
-                    grad = torch.autograd.grad(
-                        outputs=px_hat.sum(),
-                        inputs=x_hat,
-                        create_graph=True
-                    )[0]
-                    grad_norm = grad.view(sample.shape[0], -1).norm(2, dim=1)
-                    gradient_penalty = 10 * ((grad_norm - 1) ** 2).mean()
-
                     # Wasserstein distance
-                    D_loss = fake_out.mean() - real_out.mean() + gradient_penalty
+                    D_loss = fake_out.mean() - real_out.mean()
                     D_loss.backward()
                     if self.project_param['train_last_layer_only']:
                         self.D_net.module.scale_grad(0)
@@ -147,12 +132,8 @@ class Trainer:
 
                     self.G_optim.step()
 
-                    print("\r Step: {}; G_loss: {:.4f}; D_loss: {:.4f}; Alpha: [{:.3f}, {:.3f}]".format(step,
-                                                                                                        G_loss.mean(),
-                                                                                                        D_loss.mean().item(),
-                                                                                                        self.G_net.module.get_alpha(),
-                                                                                                        self.D_net.module.get_alpha()),
-                          end="")
+                    print("\r Step: {}; G_loss: {:.4f}; D_loss: {:.4f}; Alpha: [{:.3f}, {:.3f}]".format(
+                        step,G_loss.mean(),D_loss.mean().item(),self.G_net.module.get_alpha(), self.D_net.module.get_alpha()), end="")
 
                     if step % self.save_internal[depth] == 0:
                         self.dump_model(depth, step)
