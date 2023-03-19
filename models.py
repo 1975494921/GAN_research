@@ -1,6 +1,3 @@
-"""
-https://github.com/ziwei-jiang/PGGAN-PyTorch
-"""
 import torch
 from torch import nn
 import math
@@ -438,6 +435,37 @@ class D_Block(nn.Module):
 
 
 class Discriminator(nn.Module):
+    """
+    The Discriminator class of the Progressive GAN
+
+    Parameters
+    ----------
+    latent_size: int
+        The dimension of the latent vector.
+    img_size: int
+        The size of the generated image.
+    resnet: bool
+        Whether the generator is a residual generator.
+
+    References
+    ----------
+    The idea of the code is from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
+
+    To fit my project requirements, I changed the whole structure of the code and added some features:
+    1. The noise network is allowed to be used, which means the noise is not simply from the random normal distribution,
+       this is a good way to improve the quality of the generated images.
+
+    2. The residual block is allowed to be used, which means the generator is allowed to be deeper.
+
+    3. The control of the alpha is added, which means the alpha can be changed during the training process, instead of
+       just being from 0 to 1 when the training starts. The speed of the alpha change can also be controlled.
+
+    4. In the training process, the gradient on different layers can be scaled, which means the training process can be
+       more stable if new layers are added, or the previous layers are frozen.
+
+    5. The depth setting is added, which means the depth of the generator can be changed during the training process,
+         instead of just being from 1 to the max depth when the training starts. This allows the generator to be more flexible.
+    """
     def __init__(self, latent_size, img_size, resnet=False):
         super().__init__()
         self._current_depth = 1

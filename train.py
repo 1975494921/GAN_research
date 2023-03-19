@@ -1,4 +1,4 @@
-from WPGAN_models import Discriminator, Generator
+from models import Discriminator, Generator
 from config import Config
 from utils import size_to_depth, depth_to_size
 import torch
@@ -59,6 +59,7 @@ class Trainer:
         torch.set_default_tensor_type(torch.FloatTensor)
 
     def load_module(self):
+        """Load model from file."""
         pretrained_file = os.path.join(self.model_dir, "model_{}.pth".format(self.project_param['load_depth']))
         if os.path.isfile(pretrained_file):
             model_state_dict = torch.load(pretrained_file, map_location=torch.device(Config.devices[0]))
@@ -72,12 +73,7 @@ class Trainer:
             del model_state_dict
 
     def dump_model(self, depth, step):
-        """
-
-        :param depth:
-        :param step:
-        :return:
-        """
+        """Dump model to file."""
         save_dict = {'G_net': self.G_net.state_dict(), 'D_net': self.D_net.state_dict(), 'current_depth': depth,
                      'noise_size': 256, 'latent_size': self.latent_dim, 'alpha': self.G_net.module.get_alpha()}
         save_path = os.path.join(self.model_dir, "model_{}.pth".format(depth))

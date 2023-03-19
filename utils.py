@@ -5,6 +5,13 @@ import math
 
 
 class EqLR_Conv2d(nn.Module):
+    """
+    The implementation of the equalized learning rate convolutional layer.
+
+    References
+    ----------
+    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
+    """
     def __init__(self, in_channels, out_channels, kernel_size, stride=(1, 1), padding=(0, 0)):
         super(EqLR_Conv2d, self).__init__()
         self.stride = stride
@@ -30,6 +37,13 @@ class EqLR_Conv2d(nn.Module):
 
 
 class Minibatch_std(nn.Module):
+    """
+    The implementation of the minibatch standard deviation layer.
+
+    References
+    ----------
+    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
+    """
     def __init__(self):
         super().__init__()
 
@@ -52,14 +66,14 @@ class Minibatch_std(nn.Module):
         return out
 
 
-# class PixelNorm(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#
-#     def forward(self, x):
-#         return x / torch.sqrt(torch.sum(x ** 2, dim=1, keepdim=True) + 10e-8)
-
 class PixelNorm(nn.Module):
+    """
+    The implementation of the pixel normalization layer.
+
+    References
+    ----------
+    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
+    """
     def __init__(self):
         super().__init__()
 
@@ -67,9 +81,13 @@ class PixelNorm(nn.Module):
         sigma = torch.sum(x ** 2, dim=1, keepdim=True)
         return x / torch.sqrt(sigma + 10e-8)
 
+
 def depth_to_size(depth):
+    """Convert the depth of the layer to the size of the image."""
     return int(2 ** (depth + 1))
 
 
+
 def size_to_depth(size):
+    """Convert the size of the image to the depth of the layer."""
     return int(math.log2(size) - 1)

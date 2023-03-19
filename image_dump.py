@@ -2,7 +2,7 @@ from torchvision.utils import make_grid, save_image
 import torch
 from torch import nn
 import os
-from WPGAN_models import Generator, Discriminator
+from models import Generator, Discriminator
 from utils import size_to_depth
 from config import Config
 import math
