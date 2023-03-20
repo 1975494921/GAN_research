@@ -10,13 +10,6 @@ model = InceptionV3(include_top=False, pooling='avg', input_shape=image_shape)
 
 
 def calculate_fid(model, image1, image2):
-    """
-
-    :param model:
-    :param image1:
-    :param image2:
-    :return:
-    """
     images1 = preprocess_input(image1)
     images2 = preprocess_input(image2)
     images1 = np.tile(images1, (2, 1, 1, 1))
