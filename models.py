@@ -368,10 +368,8 @@ class D_Block(nn.Module):
                 nn.Flatten(),
                 nn.Linear(out_channel, 1)
             )
-
             if self.resnet:
                 self.conv1 = Residual_Block(self.conv1, in_channel + 1, out_channel)
-
                 self.conv2 = Residual_Block(self.conv2, out_channel, out_channel)
         else:
             self.conv1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
