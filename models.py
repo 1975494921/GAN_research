@@ -119,45 +119,6 @@ class ToRGB(nn.Module):
         return self.conv(x)
 
 
-class ECA_Block(nn.Module):
-    # Channel attention
-    def __init__(self, k_size=3):
-        super().__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False)
-        nn.init.xavier_uniform(self.conv.weight)
-
-    def forward(self, x):
-        # feature descriptor on the global spatial information
-        attn = self.avg_pool(x)
-
-        # Two different branches of ECA module
-        attn = self.conv(attn.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
-
-        # Multi-scale information fusion
-        attn = torch.sigmoid(attn)
-
-        return x * attn.expand_as(x)
-
-
-class SA_Block(nn.Module):
-    # Spatial Attention
-    def __init__(self, kernel_size=7):
-        super().__init__()
-        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2)
-        nn.init.xavier_uniform(self.conv.weight)
-        nn.init.zeros_(self.conv.bias)
-
-    def forward(self, x):
-        max_result, _ = torch.max(x, dim=1, keepdim=True)
-        avg_result = torch.mean(x, dim=1, keepdim=True)
-        result = torch.cat([max_result, avg_result], 1)
-        attn = self.conv(result)
-        attn = torch.sigmoid(attn)
-
-        return x * attn.expand_as(x)
-
-
 class Residual_Block(nn.Module):
     """
     The residual block for the generator
