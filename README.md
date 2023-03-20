@@ -45,14 +45,27 @@ To set up the project in your python coding environment (IDE):
     ```commandline
     python3 train.py --name project_name
     ```
-   The project is the name of the project in the config.py. Note that the GPU is required to train the model.
+   The project is the name of the project in the config.py. Note that the GPU is required to train the model. You can scale the batch size to fit your GPU memory with --batch_scale argument. For example, if you have a GPU with 16GB memory, you can scale the batch size to 8 with the following command:
+    ```commandline
+    python3 train.py --name project_name --batch_scale 8
+    ```
 
 
 5. Start to use the model with the following command:
     ```commandline
     python3 image_dump.py --name project_name
     ```
-   The project is the name of the project in the config.py. Note that the GPU is required to use the model.
+   To use this code, you will need to pass several command-line arguments when running the script:
+
+   -n or --name: (required) the name of the project, which should correspond to a pre-trained GAN model that is available in the model_trains directory. For example, if you have a pre-trained GAN model for generating faces called faces.pth, you would pass -n faces to use this model.
+   
+   -s or --image_size: (optional, default=512) the size of the generated images in pixels. This should be one of 64, 128, 256, 512, or 1024.
+   
+   --num_image: (optional, default=16) the number of images to generate.
+
+   --grid_size: (optional, default=8) the size of the grid to arrange the generated images. For example, if --grid_size is 8, the output grid will have 64 images arranged in an 8x8 grid.
+
+   --select_probability: (optional, default=0.5) the probability of selecting each generated image for the output grid. For example, if --select_probability is 0.5, approximately half of the generated images will be included in the output grid.
 
 
 # References
