@@ -26,6 +26,9 @@ class EqLR_Conv2d(nn.Module):
         self.bias = nn.Parameter(torch.Tensor(out_channels))
 
         # Initialize the weight and bias parameters using normal and zeros initialization, respectively
+        self.weight_init()
+
+    def weight_init(self):
         nn.init.normal_(self.weight)
         nn.init.zeros_(self.bias)
 
