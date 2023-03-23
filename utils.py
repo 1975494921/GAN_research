@@ -53,21 +53,21 @@ class Minibatch_std(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, x):
+    def forward(self, data):
         # Get the size of the input tensor
-        size = list(x.shape)
+        size = list(data.shape)
 
         # set the feature dimension to 1, occupying the first dimension
         size[1] = 1
 
         # compute the standard deviation of each feature across the mini-batch
-        std = torch.std(x, dim=0)
+        std = torch.std(data, dim=0)
 
         # create a tensor with the mean standard deviation repeated along the feature dimension
         mean_std = torch.mean(std).expand(tuple(size))
 
         # concatenate the input tensor with the mean standard deviation tensor along the feature dimension
-        out = torch.cat([x, mean_std], dim=1)
+        out = torch.cat([data, mean_std], dim=1)
 
         return out
 
