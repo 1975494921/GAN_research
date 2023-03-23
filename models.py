@@ -187,12 +187,12 @@ class G_Block(nn.Module):
 
         if initial_block:
             conv_layer1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(4, 4), padding=(3, 3))
+
         else:
             up_sample = nn.Upsample(scale_factor=2, mode='nearest')
             conv_layer1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
 
         conv_layer2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
-        
         if resnet:
             conv_layer1 = Residual_Block(conv_layer1, in_channel, out_channel)
             conv_layer2 = Residual_Block(conv_layer2, out_channel, out_channel)
