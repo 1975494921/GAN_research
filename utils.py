@@ -10,7 +10,7 @@ class EqLR_Conv2d(nn.Module):
 
     References
     ----------
-    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
+    The idea of code is from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=(1, 1), padding=(0, 0)):
         super(EqLR_Conv2d, self).__init__()
@@ -22,8 +22,11 @@ class EqLR_Conv2d(nn.Module):
         self.scale = (2 / fan_in) ** 0.5
 
         # Initialize the weight and bias parameters
-        self.weight = nn.Parameter(torch.Tensor(out_channels, in_channels, *kernel_size))
-        self.bias = nn.Parameter(torch.Tensor(out_channels))
+        weight_matrix = torch.zeros(out_channels, in_channels, *kernel_size)
+        self.weight = nn.Parameter(weight_matrix)
+
+        bias_matrix = torch.zeros(out_channels)
+        self.bias = nn.Parameter(bias_matrix)
 
         # Initialize the weight and bias parameters using normal and zeros initialization, respectively
         self.weight_init()
@@ -45,7 +48,7 @@ class Minibatch_std(nn.Module):
 
     References
     ----------
-    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
+    The idea of code is from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
     """
     def __init__(self):
         super().__init__()
@@ -75,7 +78,7 @@ class PixelNorm(nn.Module):
 
     References
     ----------
-    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
+    The idea of code is from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/utils.py
     """
     def __init__(self):
         super().__init__()

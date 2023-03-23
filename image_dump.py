@@ -16,6 +16,11 @@ torch.manual_seed(0)
 model_root = 'model_trains'
 image_root = 'image_results'
 
+def update_keys_name(model_dict, update_key_map):
+    # update the name of the keys with key_map_G
+    for key in update_key_map.keys():
+        model_dict[update_key_map[key]] = model_dict.pop(key)
+
 
 def generate_image(model_key, img_size, num_generate, grid_size, select_probability):
     """
@@ -75,6 +80,7 @@ def generate_image(model_key, img_size, num_generate, grid_size, select_probabil
     D_net.module.set_depth(model_depth, alpha_start=1)
 
     model_state_dict = torch.load(model_file, map_location=device)
+
     G_net.load_state_dict(model_state_dict['G_net'])
     G_net.eval()
 
@@ -82,7 +88,6 @@ def generate_image(model_key, img_size, num_generate, grid_size, select_probabil
     D_net.eval()
 
     generate_num = int(num_grid / select_probability)
-
     with torch.no_grad():
         for i in range(num_generate):
             noise = torch.randn(generate_num, latent_dim).to(device)

@@ -1,10 +1,10 @@
-import torch
+from collections import OrderedDict
 from torch import nn
-import math
 from utils import EqLR_Conv2d, Minibatch_std, PixelNorm
 from utils import depth_to_size, size_to_depth
 from config import Config
 import torch.nn.functional as F
+import numpy as np
 
 
 def print_func(*args):
@@ -31,12 +31,8 @@ def weights_init(w):
         nn.init.normal_(w.weight.data, 0.0, 0.1)
         nn.init.constant_(w.bias.data, 0)
 
-    elif classname.find('BatchNorm2d') != -1:
-        nn.init.normal_(w.weight.data, 0.0, 0.1)
-        nn.init.constant_(w.bias.data, 0)
-
     elif classname.find('Linear') != -1:
-        nn.init.normal_(w.weight.data, 0.0, 0.1)
+        nn.init.xavier_uniform_(w.weight.data)
         nn.init.constant_(w.bias.data, 0)
 
 
@@ -55,6 +51,7 @@ class Noise_Net(nn.Module):
     ----------
     The code is written on my own
     """
+
     def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
         hidden = int(in_dim // 2)
@@ -86,6 +83,7 @@ class FromRGB(nn.Module):
     ----------
     The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
     """
+
     def __init__(self, in_channel, out_channel):
         super().__init__()
         self.conv = EqLR_Conv2d(in_channel, out_channel, kernel_size=(1, 1))
@@ -111,6 +109,7 @@ class ToRGB(nn.Module):
     ----------
     The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
     """
+
     def __init__(self, in_channel, out_channel):
         super().__init__()
         self.conv = EqLR_Conv2d(in_channel, out_channel, kernel_size=(1, 1))
@@ -142,6 +141,7 @@ class Residual_Block(nn.Module):
     ----------
     The code is written on my own
     """
+
     def __init__(self, direct, in_channel, out_channel, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)):
         super().__init__()
         self.direct = direct
@@ -177,35 +177,40 @@ class G_Block(nn.Module):
 
     There are serval improvements I made:
     1. The residual connection is added to the basic block
-    2. The upsampling is replaced by nn.Identity() in the initial block, the code is more concise
+    2. The up_sample is replaced by nn.Identity() in the initial block, the code is more concise
+    3. Use the OrderedDict to store the layers, the code is more concise
     """
+
     def __init__(self, in_channel, out_channel, initial_block=False, resnet=False):
         super().__init__()
-        self.upsample = nn.Identity()
-        self.pixel_norm = PixelNorm()
+        up_sample = nn.Identity()
 
         if initial_block:
-            self.conv1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(4, 4), stride=(1, 1), padding=(3, 3))
+            conv_layer1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(4, 4), padding=(3, 3))
         else:
-            self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
-            self.conv1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            up_sample = nn.Upsample(scale_factor=2, mode='nearest')
+            conv_layer1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
 
-        self.conv2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        conv_layer2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
+        
         if resnet:
-            self.conv1 = Residual_Block(self.conv1, in_channel, out_channel)
-            self.conv2 = Residual_Block(self.conv2, out_channel, out_channel)
+            conv_layer1 = Residual_Block(conv_layer1, in_channel, out_channel)
+            conv_layer2 = Residual_Block(conv_layer2, out_channel, out_channel)
 
-        self.apply(weights_init)
+        self.block = nn.Sequential(
+            OrderedDict([
+                ('up_sample', up_sample),
+                ('conv_layer_1', conv_layer1),
+                ('leaky_relu_1', nn.LeakyReLU(0.2)),
+                ('pixel_norm_1', PixelNorm()),
+                ('conv_layer_2', conv_layer2),
+                ('leaky_relu_2', nn.LeakyReLU(0.2)),
+                ('pixel_norm_2', PixelNorm())
+            ])
+        )
 
     def forward(self, x):
-        x = self.upsample(x)
-        x = self.conv1(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.pixel_norm(x)
-        x = self.conv2(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.pixel_norm(x)
-        return x
+        return self.block(x)
 
 
 class Generator(nn.Module):
@@ -244,6 +249,7 @@ class Generator(nn.Module):
     5. The depth setting is added, which means the depth of the generator can be changed during the training process,
          instead of just being from 1 to the max depth when the training starts. This allows the generator to be more flexible.
     """
+
     def __init__(self, noise_dim, latent_size, out_res, noise_net=False, resnet=False):
         super().__init__()
         self.resnet = resnet
@@ -252,19 +258,22 @@ class Generator(nn.Module):
         self.delta_alpha = 1e-3
         self.up_sample = nn.Upsample(scale_factor=2, mode='nearest')
         self.noise_net = nn.Identity()
-        self.current_net = nn.ModuleList([G_Block(latent_size, 512, initial_block=True, resnet=self.resnet)])
-        self.toRGBs = nn.ModuleList([ToRGB(512, 3)])
+        self.current_net = nn.ModuleList([])
+        self.toRGBs = nn.ModuleList([])
         self.out_res = out_res
         self.max_depth = size_to_depth(out_res)
-
         if noise_net:
             self.noise_net = Noise_Net(noise_dim, latent_size)
 
-        for d in range(2, int(math.log2(out_res))):
-            if d < 6:
+        # append the initial block
+        self.current_net.append(G_Block(latent_size, 512, initial_block=True, resnet=self.resnet))
+        self.toRGBs.append(ToRGB(512, 3))
+
+        for depth in range(2, self.max_depth + 1):
+            if depth < 6:
                 in_channel, out_channel = 512, 512
             else:
-                in_channel, out_channel = int(512 / 2 ** (d - 6)), int(512 / 2 ** (d - 5))
+                in_channel, out_channel = 512 // np.power(2, depth - 6), 512 // np.power(2, depth - 5)
 
             self.current_net.append(G_Block(in_channel, out_channel, resnet=self.resnet))
             self.toRGBs.append(ToRGB(out_channel, 3))
@@ -276,14 +285,14 @@ class Generator(nn.Module):
             x = block(x)
 
         model_out = self.current_net[self._current_depth - 1](x)
-        x_rgb = self.toRGBs[self._current_depth - 1](model_out)
+        image_out = self.toRGBs[self._current_depth - 1](model_out)
 
-        if self.alpha < 1 and self._current_depth > 1:
+        if self._current_depth > 1 and self.alpha < 1:
             x_old = self.up_sample(x)
-            old_rgb = self.toRGBs[self._current_depth - 2](x_old)
-            x_rgb = (1 - self.alpha) * old_rgb + self.alpha * x_rgb
+            old_image_out = self.toRGBs[self._current_depth - 2](x_old)
+            image_out = (1 - self.alpha) * old_image_out + self.alpha * image_out
 
-        return x_rgb
+        return image_out
 
     def get_alpha(self):
         return self.alpha
@@ -355,40 +364,43 @@ class D_Block(nn.Module):
     The parameters of the Progressive GAN are from https://arxiv.org/pdf/1710.10196.pdf
 
     """
+
     def __init__(self, in_channel, out_channel, last_block=False, resnet=False):
         super().__init__()
-        self.minibatchstd = nn.Identity()
-        self.resnet = resnet
+        minibatchstd_layer = nn.Identity()
+
+        conv_layer_1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
+        conv_layer_2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
+        out_layer = nn.AvgPool2d(kernel_size=(2, 2), stride=(2, 2), padding=(0, 0))
 
         if last_block:
-            self.minibatchstd = Minibatch_std()
-            self.conv1 = EqLR_Conv2d(in_channel + 1, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-            self.conv2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(4, 4), stride=(1, 1))
-            self.outlayer = nn.Sequential(
+            minibatchstd_layer = Minibatch_std()
+            in_channel += 1
+            conv_layer_1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
+            conv_layer_2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(4, 4), padding=(0, 0))
+            out_layer = nn.Sequential(
                 nn.Flatten(),
                 nn.Linear(out_channel, 1)
             )
-            if self.resnet:
-                self.conv1 = Residual_Block(self.conv1, in_channel + 1, out_channel)
-                self.conv2 = Residual_Block(self.conv2, out_channel, out_channel)
-        else:
-            self.conv1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-            self.conv2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-            self.outlayer = nn.AvgPool2d(kernel_size=(2, 2), stride=(2, 2))
 
-            if self.resnet:
-                self.conv1 = Residual_Block(self.conv1, in_channel, out_channel)
-                self.conv2 = Residual_Block(self.conv2, out_channel, out_channel)
+        if resnet:
+            conv_layer_1 = Residual_Block(self.conv1, in_channel, out_channel)
+            conv_layer_2 = Residual_Block(self.conv2, out_channel, out_channel)
 
         self.apply(weights_init)
+        self.block = nn.Sequential(
+            OrderedDict([
+                ('minibatchstd_layer', minibatchstd_layer),
+                ('conv_layer_1', conv_layer_1),
+                ('leaky_relu_1', nn.LeakyReLU(0.2)),
+                ('conv_layer_2', conv_layer_2),
+                ('leaky_relu_2', nn.LeakyReLU(0.2)),
+                ('out_layer', out_layer)
+            ])
+        )
 
     def forward(self, x):
-        x = self.minibatchstd(x)
-        x = self.conv1(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.conv2(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.outlayer(x)
+        x = self.block(x)
 
         return x
 
@@ -425,6 +437,7 @@ class Discriminator(nn.Module):
     5. The depth setting is added, which means the depth of the generator can be changed during the training process,
          instead of just being from 1 to the max depth when the training starts. This allows the generator to be more flexible.
     """
+
     def __init__(self, latent_size, img_size, resnet=False):
         super().__init__()
         self._current_depth = 1
@@ -441,11 +454,11 @@ class Discriminator(nn.Module):
 
         print_func("max_depth: {}".format(self._max_depth))
         dim_list = []
-        for d in range(1, size_to_depth(img_size)):
-            if d < 4:
+        for depth in range(1, size_to_depth(img_size)):
+            if depth < 4:
                 in_channel, out_channel = 512, 512
             else:
-                in_channel, out_channel = int(512 / 2 ** (d - 3)), int(512 / 2 ** (d - 4))
+                in_channel, out_channel = 512 // np.power(2, depth - 3), 512 // np.power(2, depth - 4)
 
             dim_list.append((in_channel, out_channel))
 
@@ -458,21 +471,21 @@ class Discriminator(nn.Module):
         self.current_net.append(D_Block(512, 512, last_block=True, resnet=self.resnet))
         self.fromRGBs.append(FromRGB(3, 512))
 
-    def forward(self, x_rgb):
+    def forward(self, image_rgb):
         print_func("start forward......")
-        print_func("input shape: {}".format(x_rgb.shape))
+        print_func("input shape: {}".format(image_rgb.shape))
         RGBBlock_index = self._internal_index
 
         print_func("fromRGBs block index: {}".format(RGBBlock_index))
-        x = self.fromRGBs[RGBBlock_index](x_rgb)
+        x = self.fromRGBs[RGBBlock_index](image_rgb)
         print_func("fromRGB shape: {}".format(x.shape))
 
         x = self.current_net[self._internal_index](x)
         print_func("last_net shape: {}".format(x.shape))
 
         if self.alpha < 1 and self._internal_index < self._max_depth - 1:
-            x_rgb = self.down_sample(x_rgb)
-            x_old = self.fromRGBs[self._internal_index + 1](x_rgb)
+            image_rgb = self.down_sample(image_rgb)
+            x_old = self.fromRGBs[self._internal_index + 1](image_rgb)
             x = (1 - self.alpha) * x_old + self.alpha * x
 
         for block in self.current_net[self._internal_index + 1:]:
