@@ -1,5 +1,7 @@
 # GAN_research - Junting Li
 
+University College London, Department of Electrical and Electronic Engineering, 2023
+
 This repository contains the 3rd year project codes from Junting Li.
 
 To set up the project in your python coding environment (IDE):
