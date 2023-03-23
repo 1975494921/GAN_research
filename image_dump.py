@@ -17,7 +17,32 @@ model_root = 'model_trains'
 image_root = 'image_results'
 
 
-def main(model_key, img_size, num_generate, grid_size, select_probability):
+def generate_image(model_key, img_size, num_generate, grid_size, select_probability):
+    """
+    Generate images from trained model
+
+    Parameters
+    ----------
+    model_key: str
+        The name of the model
+    img_size: int
+        The size of the image
+    num_generate: int
+        The number of images to generate
+    grid_size: int
+        The size of the grid
+    select_probability: float
+        The probability of selecting a image
+
+    Returns
+    -------
+        None
+
+    References
+    ----------
+    This code is written on my own.
+
+    """
     model_dir = os.path.join(model_root, model_key)
     num_grid = int(grid_size * grid_size)
 
@@ -89,4 +114,4 @@ if __name__ == '__main__':
     assert num_generate > 0, "Number of images must be greater than 0"
     assert grid_size > 0, "Grid size must be greater than 0"
     assert 0 < select_probability <= 1, "Select probability must be in (0, 1]"
-    main(project_name, image_size, num_generate, grid_size, select_probability)
+    generate_image(project_name, image_size, num_generate, grid_size, select_probability)
