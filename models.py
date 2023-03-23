@@ -65,6 +65,7 @@ class Noise_Net(nn.Module):
 
     def forward(self, x):
         x = self.FN(x)
+
         return x
 
 
@@ -81,9 +82,9 @@ class FromRGB(nn.Module):
 
     References
     ----------
-    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
-    """
+    The code is reference from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
 
+    """
     def __init__(self, in_channel, out_channel):
         super().__init__()
         self.conv = EqLR_Conv2d(in_channel, out_channel, kernel_size=(1, 1))
@@ -107,7 +108,7 @@ class ToRGB(nn.Module):
 
     References
     ----------
-    The code is modified from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
+    The code is reference from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
     """
 
     def __init__(self, in_channel, out_channel):
@@ -183,19 +184,19 @@ class G_Block(nn.Module):
     """
     def __init__(self, in_channel, out_channel, initial_block=False, resnet=False):
         super().__init__()
-        up_sample = nn.Identity()
+        up_sample = nn.Upsample(scale_factor=2, mode='nearest')
+        conv_layer1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
 
         if initial_block:
             conv_layer1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(4, 4), padding=(3, 3))
-
-        else:
-            up_sample = nn.Upsample(scale_factor=2, mode='nearest')
-            conv_layer1 = EqLR_Conv2d(in_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
+            up_sample = nn.Identity()
 
         conv_layer2 = EqLR_Conv2d(out_channel, out_channel, kernel_size=(3, 3), padding=(1, 1))
         if resnet:
             conv_layer1 = Residual_Block(conv_layer1, in_channel, out_channel)
             conv_layer2 = Residual_Block(conv_layer2, out_channel, out_channel)
+
+        self.apply(weights_init)
 
         self.block = nn.Sequential(
             OrderedDict([
@@ -281,6 +282,7 @@ class Generator(nn.Module):
     def forward(self, noise):
         noise = self.noise_net(noise)
         x = noise.unsqueeze(-1).unsqueeze(-1)
+        
         for block in self.current_net[:int(self._current_depth) - 1]:
             x = block(x)
 
