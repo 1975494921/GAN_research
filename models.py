@@ -114,8 +114,8 @@ class ToRGB(nn.Module):
         super().__init__()
         self.conv = EqLR_Conv2d(in_channel, out_channel, kernel_size=(1, 1))
 
-    def forward(self, x):
-        return self.conv(x)
+    def forward(self, data):
+        return self.conv(data)
 
 
 class Residual_Block(nn.Module):
@@ -150,9 +150,10 @@ class Residual_Block(nn.Module):
             self.residual = EqLR_Conv2d(in_channel, out_channel,
                                         kernel_size=kernel_size, stride=stride, padding=padding)
 
-    def forward(self, x):
-        out = self.direct(x)
-        return out + self.residual(x)
+    def forward(self, data):
+        out = self.direct(data)
+
+        return out + self.residual(data)
 
 
 class G_Block(nn.Module):
@@ -209,8 +210,8 @@ class G_Block(nn.Module):
             ])
         )
 
-    def forward(self, x):
-        return self.block(x)
+    def forward(self, data):
+        return self.block(data)
 
 
 class Generator(nn.Module):
@@ -399,10 +400,10 @@ class D_Block(nn.Module):
             ])
         )
 
-    def forward(self, x):
-        x = self.block(x)
+    def forward(self, data):
+        data = self.block(data)
 
-        return x
+        return data
 
 
 class Discriminator(nn.Module):
@@ -477,23 +478,23 @@ class Discriminator(nn.Module):
         RGBBlock_index = self._internal_index
 
         print_func("fromRGBs block index: {}".format(RGBBlock_index))
-        x = self.fromRGBs[RGBBlock_index](image_rgb)
-        print_func("fromRGB shape: {}".format(x.shape))
+        data = self.fromRGBs[RGBBlock_index](image_rgb)
+        print_func("fromRGB shape: {}".format(data.shape))
 
-        x = self.current_net[self._internal_index](x)
-        print_func("last_net shape: {}".format(x.shape))
+        data = self.current_net[self._internal_index](data)
+        print_func("last_net shape: {}".format(data.shape))
 
         if self.alpha < 1 and self._internal_index < self._max_depth - 1:
             image_rgb = self.down_sample(image_rgb)
             x_old = self.fromRGBs[self._internal_index + 1](image_rgb)
-            x = (1 - self.alpha) * x_old + self.alpha * x
+            data = (1 - self.alpha) * x_old + self.alpha * data
 
         for block in self.current_net[self._internal_index + 1:]:
-            print_func(x.shape)
+            print_func(data.shape)
             print_func(block)
-            x = block(x)
+            data = block(data)
 
-        return x
+        return data
 
     def set_depth(self, depth: int, alpha_start=0, delta_alpha=1e-3):
         if 1 <= depth <= self._max_depth:
