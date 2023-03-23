@@ -181,7 +181,6 @@ class G_Block(nn.Module):
     2. The up_sample is replaced by nn.Identity() in the initial block, the code is more concise
     3. Use the OrderedDict to store the layers, the code is more concise
     """
-
     def __init__(self, in_channel, out_channel, initial_block=False, resnet=False):
         super().__init__()
         up_sample = nn.Identity()

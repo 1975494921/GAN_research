@@ -35,9 +35,9 @@ class EqLR_Conv2d(nn.Module):
         nn.init.normal_(self.weight)
         nn.init.zeros_(self.bias)
 
-    def forward(self, x):
+    def forward(self, data):
         # Scale the weight parameter by the scaling factor and perform the convolution operation
-        out = F.conv2d(x, self.weight * self.scale, self.bias, self.stride, self.padding)
+        out = F.conv2d(data, self.weight * self.scale, self.bias, stride=self.stride, padding=self.padding)
 
         return out
 
