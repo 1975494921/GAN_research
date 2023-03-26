@@ -77,3 +77,5 @@ To set up the project in your python coding environment (IDE):
 [2] Ziwei-Jiang. (n.d.). Ziwei-Jiang/PGGAN-pytorch: A pytorch implementation of progressive growing gan. GitHub. Retrieved March 19, 2023, from https://github.com/ziwei-jiang/PGGAN-PyTorch 
 
 [3] Brownlee, J. (2019, October 10). How to implement the Frechet Inception Distance (FID) for evaluating Gans. MachineLearningMastery.com. Retrieved March 20, 2023, from https://machinelearningmastery.com/how-to-implement-the-frechet-inception-distance-fid-from-scratch/#:~:text=The%20FID%20score%20is%20then,*sqrt(C_1*C_2)) 
+
+[4] Neural transfer using pytorch. Neural Transfer Using PyTorch - PyTorch Tutorials 2.0.0+cu117 documentation. (n.d.). Retrieved March 26, 2023, from https://pytorch.org/tutorials/advanced/neural_style_tutorial.html
