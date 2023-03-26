@@ -110,7 +110,6 @@ class ToRGB(nn.Module):
     ----------
     The code is reference from https://github.com/ziwei-jiang/PGGAN-PyTorch/blob/master/model.py
     """
-
     def __init__(self, in_channel, out_channel):
         super().__init__()
         self.conv = EqLR_Conv2d(in_channel, out_channel, kernel_size=(1, 1))
@@ -250,7 +249,6 @@ class Generator(nn.Module):
     5. The depth setting is added, which means the depth of the generator can be changed during the training process,
          instead of just being from 1 to the max depth when the training starts. This allows the generator to be more flexible.
     """
-
     def __init__(self, noise_dim, latent_size, out_res, noise_net=False, resnet=False):
         super().__init__()
         self.resnet = resnet
@@ -282,16 +280,18 @@ class Generator(nn.Module):
     def forward(self, noise):
         noise = self.noise_net(noise)
         x = noise.unsqueeze(-1).unsqueeze(-1)
-        
+
         for block in self.current_net[:int(self._current_depth) - 1]:
             x = block(x)
 
         model_out = self.current_net[self._current_depth - 1](x)
         image_out = self.toRGBs[self._current_depth - 1](model_out)
+        print_func(model_out.shape, image_out.shape)
 
         if self._current_depth > 1 and self.alpha < 1:
             x_old = self.up_sample(x)
             old_image_out = self.toRGBs[self._current_depth - 2](x_old)
+            print_func(old_image_out.shape, image_out.shape)
             image_out = (1 - self.alpha) * old_image_out + self.alpha * image_out
 
         return image_out
